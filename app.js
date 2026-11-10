@@ -24,9 +24,8 @@
   const LEGACY_HISTORY = "isb_dice_history_v1";
   const LEGACY_GPS = "isb_dice_gps_v1";
 
-  const VALID_POOLS = new Set(["all", "active", "hangout", "unexplored", "nearby", "metro"]);
+  const VALID_POOLS = new Set(["all", "active", "hangout", "unexplored"]);
   const VALID_SORTS = new Set(["distance", "grid", "hangout"]);
-  const NEARBY_RADIUS_KM = 5.0;
 
   function loadJson(key, fallback) {
     try {
@@ -350,7 +349,7 @@
     homeSpotId: initial.homeSpotId,
     homeSpotBySector: initial.homeSpotBySector,
     gpsOrigin: initial.gpsOrigin,
-    poolMode: initial.poolMode, // 'all' | 'active' | 'hangout' | 'unexplored' | 'nearby' | 'metro'
+    poolMode: initial.poolMode, // 'all' | 'active' | 'hangout' | 'unexplored'
     rolledLetter: initial.rolledLetter,
     rolledNumber: initial.rolledNumber,
     selectedSectorId: initial.selectedSectorId,
@@ -542,7 +541,15 @@
     };
   }
 
-  const haversineKm = DATA.haversineKm;
+  function haversineKm(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
 
   function bearingCompass(lat1, lng1, lat2, lng2) {
     const y = Math.sin(((lng2 - lng1) * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180);
@@ -673,16 +680,10 @@
 
   // ==================== Pool Filtering ====================
   function getEligibleSectors() {
-    const origin = state.poolMode === "nearby" ? getCurrentOrigin() : null;
     return DATA.SECTORS.filter((s) => {
       if (state.poolMode === "active") return s.tier === "active" || s.tier === "developing";
       if (state.poolMode === "hangout") return s.hangoutScore >= 4;
       if (state.poolMode === "unexplored") return !state.explored.has(s.id);
-      if (state.poolMode === "nearby") {
-        if (!origin.isGps && origin.sector && s.id === origin.sector) return true;
-        return haversineKm(origin.lat, origin.lng, s.lat, s.lng) <= NEARBY_RADIUS_KM;
-      }
-      if (state.poolMode === "metro") return Boolean(s.metroServed);
       return true;
     });
   }
@@ -702,13 +703,10 @@
 
   // ==================== SVG Map Rendering ====================
   const sectorNodes = new Map();
-  const metroStopMap = new Map();
   let sectorsLayerEl = null;
-  let metroLayerEl = null;
   let landmarksLayerEl = null;
   let fxLayerEl = null;
   let hoveredSectorId = null;
-  let hoveredMetroStopId = null;
   let suppressClickUntil = 0;
   let gestureDragged = false;
 
@@ -991,7 +989,7 @@
       const nextG = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest(".sector-group") : null;
       if (!nextG) {
         hoveredSectorId = null;
-        if (!hoveredMetroStopId) hideTooltip();
+        hideTooltip();
       }
     });
 
@@ -1002,123 +1000,12 @@
       selectSectorManually(g.dataset.id);
     });
 
-    // 5. Interactive Orange & Red Line Metro Network Layer
-    metroStopMap.clear();
-    metroLayerEl = svgEl("g", { id: "metro-layer", class: "metro-layer" }, vp);
-
-    DATA.METRO_LINES.forEach((lineObj) => {
-      const pts = lineObj.stops.map((st) => {
-        const p = latLngToSvg(st.lat, st.lng);
-        return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
-      });
-      svgEl("polyline", { class: "metro-line-casing", points: pts.join(" "), "pointer-events": "none" }, metroLayerEl);
-      svgEl("polyline", { class: `metro-line-path metro-line-${lineObj.id}`, points: pts.join(" "), "pointer-events": "none" }, metroLayerEl);
-    });
-
-    // Subtle transit line labels
-    const orangeLblStop = DATA.METRO_LINES[0]?.stops[7]; // Golra Mor area
-    if (orangeLblStop) {
-      const p = latLngToSvg(orangeLblStop.lat, orangeLblStop.lng);
-      const t = svgEl(
-        "text",
-        {
-          x: p.x - 10,
-          y: p.y - 10,
-          fill: "rgba(253, 186, 116, 0.85)",
-          "font-size": "6.8",
-          "font-weight": "700",
-          "letter-spacing": "1.2",
-          "text-anchor": "middle",
-          transform: `rotate(-28 ${p.x - 10} ${p.y - 10})`,
-          "pointer-events": "none",
-          style: "text-shadow: 0 1px 3px #000;",
-        },
-        metroLayerEl
-      );
-      t.textContent = "ORANGE LINE";
-    }
-    const redLblStop = DATA.METRO_LINES[1]?.stops[2]; // Blue Area Jinnah Ave
-    if (redLblStop) {
-      const p = latLngToSvg(redLblStop.lat, redLblStop.lng);
-      const t = svgEl(
-        "text",
-        {
-          x: p.x + 8,
-          y: p.y - 8,
-          fill: "rgba(253, 164, 175, 0.88)",
-          "font-size": "6.8",
-          "font-weight": "700",
-          "letter-spacing": "1.2",
-          "text-anchor": "middle",
-          transform: `rotate(-28 ${p.x + 8} ${p.y - 8})`,
-          "pointer-events": "none",
-          style: "text-shadow: 0 1px 3px #000;",
-        },
-        metroLayerEl
-      );
-      t.textContent = "RED LINE";
-    }
-
-    DATA.METRO_STOPS.forEach((stop) => {
-      metroStopMap.set(stop.id, stop);
-      const p = latLngToSvg(stop.lat, stop.lng);
-      const g = svgEl("g", { class: "metro-stop-group", "data-stop-id": stop.id }, metroLayerEl);
-      svgEl("circle", { cx: p.x, cy: p.y, r: 8.5, fill: "transparent" }, g);
-      if (stop.interchange) {
-        svgEl("circle", { class: "metro-stop-dot", cx: p.x, cy: p.y, r: 5.2, fill: "#09111a", stroke: "#fb923c", "stroke-width": 1.6 }, g);
-        svgEl("circle", { cx: p.x, cy: p.y, r: 2.7, fill: "#f43f5e", stroke: "#fde68a", "stroke-width": 0.9, "pointer-events": "none" }, g);
-      } else {
-        const fillCol = stop.lines.includes("red") ? "#f43f5e" : "#fb923c";
-        svgEl("circle", { class: "metro-stop-dot", cx: p.x, cy: p.y, r: 3.1, fill: fillCol, stroke: "#070e15", "stroke-width": 1.0 }, g);
-      }
-    });
-
-    metroLayerEl.addEventListener("pointerover", (e) => {
-      if (e.pointerType === "touch" || gestureDragged) return;
-      const g = e.target.closest(".metro-stop-group");
-      if (!g) return;
-      const stopId = g.dataset.stopId;
-      if (stopId !== hoveredMetroStopId) {
-        hoveredMetroStopId = stopId;
-        hoveredSectorId = null;
-        const stop = metroStopMap.get(stopId);
-        if (stop) showMetroTooltip(stop, e);
-      }
-    });
-
-    metroLayerEl.addEventListener("pointermove", (e) => {
-      if (e.pointerType === "touch" || !hoveredMetroStopId || gestureDragged) return;
-      moveTooltip(e);
-    });
-
-    metroLayerEl.addEventListener("pointerout", (e) => {
-      if (e.pointerType === "touch") return;
-      const nextStop = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest(".metro-stop-group") : null;
-      if (!nextStop) {
-        hoveredMetroStopId = null;
-        if (!hoveredSectorId) hideTooltip();
-      }
-    });
-
-    metroLayerEl.addEventListener("click", (e) => {
-      if (performance.now() < suppressClickUntil) return;
-      const g = e.target.closest(".metro-stop-group");
-      if (!g) return;
-      e.stopPropagation();
-      const stop = metroStopMap.get(g.dataset.stopId);
-      if (!stop || !Array.isArray(stop.serves) || !stop.serves.length) return;
-      // Cycle between served sectors across the highway on repeated clicks
-      const currIdx = stop.serves.indexOf(state.selectedSectorId);
-      const nextSecId = currIdx >= 0 ? stop.serves[(currIdx + 1) % stop.serves.length] : stop.serves[0];
-      if (DATA.SECTOR_MAP[nextSecId]) {
-        selectSectorManually(nextSecId);
-        const lineName = stop.interchange ? "Orange ↔ Red" : stop.lines.includes("red") ? "Red Line" : "Orange Line";
-        el.mapToast.textContent = `${lineName} · ${stop.name} → ${nextSecId}`;
-      }
-    });
-
-    // 6. Major Landmarks Layer (created once, toggled cleanly)
+    // 5. Landmarks & Orange Line Metro Layer (created once, toggled cleanly)
     landmarksLayerEl = svgEl("g", { id: "landmarks-layer", "pointer-events": "none" }, vp);
+    DATA.METRO_STOPS.forEach((stop) => {
+      const p = latLngToSvg(stop.lat, stop.lng);
+      svgEl("circle", { cx: p.x, cy: p.y, r: 2.5, fill: "#fb923c", stroke: "#070e15", "stroke-width": 0.9 }, landmarksLayerEl);
+    });
     DATA.LANDMARKS.forEach((lm) => {
       const p = latLngToSvg(lm.lat, lm.lng);
       svgEl("circle", { cx: p.x, cy: p.y, r: 3.1, fill: "#38bdf8", stroke: "#070e15", "stroke-width": 1.1 }, landmarksLayerEl);
@@ -1138,7 +1025,7 @@
       t.textContent = lm.name;
     });
 
-    // 7. Dynamic Home Radar + Active Route Trajectory Layer
+    // 6. Dynamic Home Radar + Active Route Trajectory Layer
     fxLayerEl = svgEl("g", { id: "fx-layer", "pointer-events": "none" }, vp);
   }
 
@@ -1308,24 +1195,6 @@
     fxLayerEl.innerHTML = "";
 
     const originPt = latLngToSvg(origin.lat, origin.lng);
-
-    // 5 km Radius visualization when "Under 5 km" filter is active
-    if (state.poolMode === "nearby") {
-      const radiusSvg = (NEARBY_RADIUS_KM / 111.19) * PROJ.scale;
-      svgEl(
-        "circle",
-        { class: "radius-ring", cx: originPt.x.toFixed(1), cy: originPt.y.toFixed(1), r: radiusSvg.toFixed(1) },
-        fxLayerEl
-      );
-      const lblY = originPt.y - radiusSvg > 26 ? originPt.y - radiusSvg - 6 : originPt.y + radiusSvg + 12;
-      const radLbl = svgEl(
-        "text",
-        { class: "radius-ring-label", x: originPt.x.toFixed(1), y: lblY.toFixed(1) },
-        fxLayerEl
-      );
-      radLbl.textContent = `${NEARBY_RADIUS_KM} KM RADIUS`;
-    }
-
     svgEl("circle", { class: "home-ring", cx: originPt.x, cy: originPt.y, r: 10 }, fxLayerEl);
     svgEl("circle", { cx: originPt.x, cy: originPt.y, r: 4.5, fill: "#34d399", stroke: "#042f2e", "stroke-width": 1.6 }, fxLayerEl);
 
@@ -1351,29 +1220,6 @@
     if (!target) return;
 
     const targetPt = latLngToSvg(target.lat, target.lng);
-
-    // Highlight nearest Metro station to selected sector
-    if (target.nearestMetro && (state.showLandmarks || state.poolMode === "metro")) {
-      const nm = target.nearestMetro;
-      const nmPt = latLngToSvg(nm.lat, nm.lng);
-      const nmColor = nm.lines && nm.lines.includes("red") && !nm.lines.includes("orange") ? "#f43f5e" : "#fb923c";
-      svgEl(
-        "circle",
-        { class: "metro-nearest-ring", cx: nmPt.x.toFixed(1), cy: nmPt.y.toFixed(1), r: 8.5, stroke: nmColor },
-        fxLayerEl
-      );
-      const nmLabel = svgEl(
-        "text",
-        {
-          class: "metro-nearest-label",
-          x: (nmPt.x + 9).toFixed(1),
-          y: (nmPt.y + 3).toFixed(1),
-        },
-        fxLayerEl
-      );
-      nmLabel.textContent = `M · ${nm.name}`;
-    }
-
     svgEl("circle", { class: "beacon-ring", cx: targetPt.x, cy: targetPt.y, r: 14 }, fxLayerEl);
 
     if (origin.isGps || target.id !== origin.sector) {
@@ -1483,12 +1329,6 @@
       }
     });
 
-    if (metroLayerEl) {
-      const showMetro = state.showLandmarks || state.poolMode === "metro";
-      metroLayerEl.style.display = showMetro ? "" : "none";
-      metroLayerEl.classList.toggle("emphasized", state.poolMode === "metro");
-    }
-
     if (landmarksLayerEl) {
       landmarksLayerEl.style.display = state.showLandmarks ? "" : "none";
     }
@@ -1497,26 +1337,6 @@
   }
 
   // ==================== Map Tooltip ====================
-  function showMetroTooltip(stop, evt) {
-    const origin = getCurrentOrigin();
-    const dist = haversineKm(origin.lat, origin.lng, stop.lat, stop.lng).toFixed(1);
-    const lineText = stop.interchange
-      ? "ORANGE ↔ RED"
-      : stop.lines.includes("red")
-      ? "RED LINE"
-      : "ORANGE LINE";
-    el.tooltip.innerHTML = `
-      <div class="tt-head">
-        <span class="tt-code">${lineText}</span>
-        <span class="tt-dist">${dist} km</span>
-      </div>
-      <div class="tt-title">${stop.name}</div>
-      <div class="tt-status">Serves: ${stop.serves.join(", ")} · Click to inspect</div>
-    `;
-    el.tooltip.classList.add("visible");
-    moveTooltip(evt);
-  }
-
   function showTooltip(sec, evt) {
     const origin = getCurrentOrigin();
     const isHome = !origin.isGps && sec.id === origin.sector;
@@ -1541,7 +1361,6 @@
 
   function hideTooltip() {
     hoveredSectorId = null;
-    hoveredMetroStopId = null;
     el.tooltip.classList.remove("visible");
   }
 
@@ -1625,13 +1444,10 @@
 
     el.letterPoolChips.innerHTML = "";
     if (!letters.length) {
-      const origin = getCurrentOrigin();
       const msg = document.createElement("span");
       msg.className = `pool-empty-msg${allDoneUnexplored ? " complete" : ""}`;
       msg.textContent = allDoneUnexplored
         ? `All ${DATA.SECTORS.length} sectors explored!`
-        : state.poolMode === "nearby"
-        ? `No sectors within ${NEARBY_RADIUS_KM} km of ${origin.shortLabel}`
         : "No sectors match this filter";
       el.letterPoolChips.appendChild(msg);
 
@@ -2012,57 +1828,6 @@
     const isThisHome = origin.sector === sec.id && !origin.isGps;
     const neighbors = getAdjacentSectors(sec);
 
-    // Metro transit card HTML for target sector
-    const nm = sec.nearestMetro;
-    let metroBriefHtml = "";
-    if (nm) {
-      const badgeLines = sec.metroServed && sec.metroLines.length ? sec.metroLines : nm.lines || ["orange"];
-      const tagsHtml = badgeLines
-        .map((ln) => `<span class="metro-tag ${ln}">${ln === "red" ? "Red Line" : "Orange Line"}</span>`)
-        .join("");
-      const accessNote = sec.metroServed
-        ? `~${nm.distKm.toFixed(1)} km from center · Metro-accessible`
-        : `~${nm.distKm.toFixed(1)} km from sector (short ride from stop)`;
-
-      let transferHtml = "";
-      if (!isThisHome && typeof DATA.findNearestMetro === "function") {
-        const origMetro = DATA.findNearestMetro(origin.lat, origin.lng);
-        if (origMetro && sec.metroServed) {
-          if (origMetro.distKm <= 2.3) {
-            const origHasOrange = origMetro.lines.includes("orange");
-            const origHasRed = origMetro.lines.includes("red");
-            const destHasOrange = nm.lines.includes("orange");
-            const destHasRed = nm.lines.includes("red");
-
-            if (origMetro.id === nm.id) {
-              transferHtml = `Share <strong>${nm.name}</strong> stop (~${origMetro.distKm.toFixed(1)} km from ${origin.shortLabel}).`;
-            } else if (origHasOrange && destHasOrange) {
-              transferHtml = `Board <strong>Orange Line</strong> at <strong>${origMetro.name}</strong> (${origMetro.distKm.toFixed(1)} km from ${origin.shortLabel}) → alight <strong>${nm.name}</strong>.`;
-            } else if (origHasRed && destHasRed) {
-              transferHtml = `Board <strong>Red Line</strong> at <strong>${origMetro.name}</strong> (${origMetro.distKm.toFixed(1)} km from ${origin.shortLabel}) → alight <strong>${nm.name}</strong>.`;
-            } else {
-              const firstLine = origHasOrange ? "Orange Line" : "Red Line";
-              const nextLine = destHasRed ? "Red Line" : "Orange Line";
-              transferHtml = `Board <strong>${firstLine}</strong> at <strong>${origMetro.name}</strong> → swap at <strong>Faiz Ahmed Faiz (Peshawar Morr)</strong> → <strong>${nextLine}</strong> to <strong>${nm.name}</strong>.`;
-            }
-          } else {
-            transferHtml = `Closest stop to ${origin.shortLabel}: <strong>${origMetro.name}</strong> (${origMetro.distKm.toFixed(1)} km away).`;
-          }
-        }
-      }
-
-      metroBriefHtml = `
-        <div class="metro-brief">
-          <div class="metro-brief-head">
-            ${tagsHtml}
-            <span class="metro-station-name">Nearest Metro: ${nm.name}</span>
-            <span class="metro-dist-pill">(${accessNote})</span>
-          </div>
-          ${transferHtml ? `<div class="metro-brief-transfer">${transferHtml}</div>` : ""}
-        </div>
-      `;
-    }
-
     const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${sec.lat},${sec.lng}`;
     const gdirUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${sec.lat},${sec.lng}`;
 
@@ -2109,7 +1874,6 @@
         <div class="route-brief">
           <strong>From ${origin.label}:</strong> ${info.routeText}
         </div>
-        ${metroBriefHtml}
       </div>
 
       <div class="guide-section">
@@ -2456,14 +2220,8 @@
     populateHomeSectorSelect();
     populateHomeSpotSelect();
     syncOriginUI();
-    if (state.poolMode === "nearby" && state.rolledLetter && !getEligibleLetters().includes(state.rolledLetter)) {
-      state.rolledLetter = null;
-      state.rolledNumber = null;
-      state.selectedSectorId = null;
-    }
     syncUrlHash(state.selectedSectorId);
     persistState();
-    renderDiceUI();
     updateMapState();
     renderFieldGuide(state.selectedSectorId ? DATA.SECTOR_MAP[state.selectedSectorId] : null);
     if (el.atlasBackdrop.classList.contains("open")) {
