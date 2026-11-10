@@ -165,7 +165,47 @@
     };
   }
 
+  function parseHashSectorId(hashStr = window.location.hash) {
+    if (!hashStr) return null;
+    let raw = hashStr.replace(/^#/, "").trim();
+    if (!raw) return null;
+    if (raw.toLowerCase().startsWith("sector=")) {
+      raw = raw.slice(7);
+    }
+    try {
+      raw = decodeURIComponent(raw);
+    } catch {
+      // ignore malformed URI sequence
+    }
+    const clean = raw.trim().toUpperCase();
+    if (DATA.SECTOR_MAP[clean]) return clean;
+    const m = clean.match(/^([B-I])-?(\d{1,2})$/);
+    if (m) {
+      const normalized = `${m[1]}-${parseInt(m[2], 10)}`;
+      if (DATA.SECTOR_MAP[normalized]) return normalized;
+    }
+    return null;
+  }
+
+  function syncUrlHash(sectorId) {
+    const targetHash = sectorId ? `#${sectorId}` : "";
+    if (window.location.hash === targetHash) return;
+    try {
+      const baseUrl = window.location.pathname + window.location.search;
+      history.replaceState(null, "", targetHash ? `${baseUrl}${targetHash}` : baseUrl);
+    } catch {
+      if (targetHash) window.location.hash = targetHash;
+    }
+  }
+
   const initial = loadPersistedState();
+  const initialHashSectorId = parseHashSectorId();
+  if (initialHashSectorId && DATA.SECTOR_MAP[initialHashSectorId]) {
+    const sec = DATA.SECTOR_MAP[initialHashSectorId];
+    initial.selectedSectorId = sec.id;
+    initial.rolledLetter = sec.letter;
+    initial.rolledNumber = sec.number;
+  }
 
   // App state
   const state = {
@@ -188,8 +228,6 @@
     atlasLetterFilter: initial.atlasLetterFilter,
     atlasSort: initial.atlasSort,
     viewBox: initial.viewBox,
-    isPanning: false,
-    panStart: { x: 0, y: 0 },
   };
 
   function persistState() {
@@ -234,8 +272,11 @@
     atlasGrid: document.getElementById("atlas-grid"),
 
     svg: document.getElementById("islamabad-map"),
+    mapStage: document.querySelector(".map-stage"),
     viewport: document.getElementById("map-viewport"),
     tooltip: document.getElementById("map-tooltip"),
+    mapLegend: document.getElementById("map-legend"),
+    toggleLegendBtn: document.getElementById("toggle-legend-btn"),
     mapToast: document.getElementById("map-status-toast"),
     sectorSearch: document.getElementById("sector-search"),
     searchResults: document.getElementById("search-results"),
@@ -505,23 +546,26 @@
 
   function getEligibleLetters() {
     const set = new Set(getEligibleSectors().map((s) => s.letter));
-    const list = DATA.LETTERS.filter((L) => set.has(L));
-    return list.length ? list : DATA.LETTERS;
+    return DATA.LETTERS.filter((L) => set.has(L));
   }
 
   function getEligibleNumbersForLetter(letter) {
     if (!letter) return [];
-    const eligible = getEligibleSectors()
+    return getEligibleSectors()
       .filter((s) => s.letter === letter)
-      .map((s) => s.number)
-      .sort((a, b) => a - b);
-    if (eligible.length) return eligible;
-    return DATA.SECTORS.filter((s) => s.letter === letter)
       .map((s) => s.number)
       .sort((a, b) => a - b);
   }
 
   // ==================== SVG Map Rendering ====================
+  const sectorNodes = new Map();
+  let sectorsLayerEl = null;
+  let landmarksLayerEl = null;
+  let fxLayerEl = null;
+  let hoveredSectorId = null;
+  let suppressClickUntil = 0;
+  let gestureDragged = false;
+
   function svgEl(tag, attrs = {}, parent = null) {
     const node = document.createElementNS(SVG_NS, tag);
     for (const [k, v] of Object.entries(attrs)) {
@@ -541,8 +585,6 @@
   }
 
   function sectorBaseFill(sec) {
-    const origin = getCurrentOrigin();
-    if (!origin.isGps && sec.id === origin.sector) return "rgba(16, 185, 129, 0.22)";
     switch (sec.category) {
       case "park":
         return "rgba(34, 197, 94, 0.2)";
@@ -588,12 +630,13 @@
     }
   }
 
-  function renderMap() {
+  function initMap() {
     const vp = el.viewport;
     vp.innerHTML = "";
+    sectorNodes.clear();
 
-    // 1. Subtle Cartographic Graticule
-    const gridG = svgEl("g", { opacity: "0.22" }, vp);
+    // 1. Subtle Cartographic Graticule (static)
+    const gridG = svgEl("g", { id: "grid-layer", opacity: "0.22", "pointer-events": "none" }, vp);
     for (let x = 0; x <= 1320; x += 110) {
       svgEl("line", { x1: x, y1: 0, x2: x, y2: 880, stroke: "#1e3a52", "stroke-width": 0.7, "stroke-dasharray": "3 6" }, gridG);
     }
@@ -601,8 +644,8 @@
       svgEl("line", { x1: 0, y1: y, x2: 1320, y2: y, stroke: "#1e3a52", "stroke-width": 0.7, "stroke-dasharray": "3 6" }, gridG);
     }
 
-    // 2. Natural Topography: Margalla Hills & Rawal Lake & Shakarparian
-    const topoG = svgEl("g", {}, vp);
+    // 2. Natural Topography: Margalla Hills & Rawal Lake & Shakarparian (static)
+    const topoG = svgEl("g", { id: "topo-layer", "pointer-events": "none" }, vp);
     DATA.MARGALLA_RIDGES.forEach((ridge, idx) => {
       svgEl(
         "polygon",
@@ -673,8 +716,8 @@
     );
     sTxt.textContent = "Shakarparian";
 
-    // 3. Arterial Highways & Avenues
-    const roadsG = svgEl("g", {}, vp);
+    // 3. Arterial Highways & Avenues (static)
+    const roadsG = svgEl("g", { id: "roads-layer", "pointer-events": "none" }, vp);
     DATA.CORRIDORS.forEach((road) => {
       const pts = road.points.map((pt) => {
         const p = latLngToSvg(pt.lat, pt.lng);
@@ -746,37 +789,21 @@
     );
     ijTxt.textContent = "IJP ROAD · RAWALPINDI BORDER";
 
-    // 4. All 71 Sector Polygons
-    const sectorsG = svgEl("g", { id: "sectors-layer" }, vp);
-    const eligibleIds = new Set(getEligibleSectors().map((s) => s.id));
-    const origin = getCurrentOrigin();
+    // 4. All 71 Sector Polygons (created once; state transitions toggle CSS classes)
+    sectorsLayerEl = svgEl("g", { id: "sectors-layer" }, vp);
 
     DATA.SECTORS.forEach((sec) => {
       const centerSvg = latLngToSvg(sec.lat, sec.lng);
-      const isHome = !origin.isGps && sec.id === origin.sector;
-      const isSelected = sec.id === state.selectedSectorId;
-      const isRowLit = state.rolledLetter === sec.letter && !state.selectedSectorId;
-      const isRowDimmed = state.rolledLetter && sec.letter !== state.rolledLetter && !state.selectedSectorId;
-      const isExplored = state.explored.has(sec.id);
-      const isDimPool = !eligibleIds.has(sec.id) && !isSelected && !isHome;
+      const g = svgEl("g", { class: "sector-group", "data-id": sec.id }, sectorsLayerEl);
 
-      const classes = ["sector-group"];
-      if (isHome) classes.push("home-base");
-      if (isSelected) classes.push("selected");
-      if (isRowLit) classes.push("row-lit");
-      if (isRowDimmed) classes.push("row-dimmed");
-      if (isDimPool) classes.push("dimmed-pool");
-
-      const g = svgEl("g", { class: classes.join(" "), "data-id": sec.id }, sectorsG);
-
-      svgEl(
+      const poly = svgEl(
         "polygon",
         {
           class: "sector-poly",
           points: polyPointsStr(sec.polygon),
           fill: sectorBaseFill(sec),
           stroke: sectorBaseStroke(sec),
-          "stroke-width": isSelected ? 3 : isHome ? 2.4 : 1.15,
+          "stroke-width": 1.15,
           rx: 3,
         },
         g
@@ -784,66 +811,88 @@
 
       // Subtle inner Markaz crosshairs on developed/commercial sectors
       if (sec.tier === "active" && sec.category !== "park") {
-        svgEl("circle", { cx: centerSvg.x, cy: centerSvg.y + 8, r: 1.8, fill: "rgba(255,255,255,0.22)" }, g);
+        svgEl("circle", { cx: centerSvg.x, cy: centerSvg.y + 8, r: 1.8, fill: "rgba(255,255,255,0.22)", "pointer-events": "none" }, g);
       }
 
       const lbl = svgEl("text", { class: "sector-label", x: centerSvg.x, y: centerSvg.y - 2 }, g);
       lbl.textContent = sec.id;
 
-      if (isHome) {
-        const sub = svgEl("text", { class: "sector-sublabel", x: centerSvg.x, y: centerSvg.y + 11, style: "fill:#6ee7b7;font-weight:700;" }, g);
-        sub.textContent = "HOME";
-      } else if (isExplored) {
-        const chk = svgEl("text", { class: "sector-sublabel", x: centerSvg.x, y: centerSvg.y + 11, style: "fill:#34d399;font-weight:700;" }, g);
-        chk.textContent = "✓";
-      }
+      const sublabel = svgEl("text", { class: "sector-sublabel", x: centerSvg.x, y: centerSvg.y + 11 }, g);
 
-      // Interactive pointer events
-      g.addEventListener("mouseenter", (e) => showTooltip(sec, e));
-      g.addEventListener("mousemove", (e) => moveTooltip(e));
-      g.addEventListener("mouseleave", hideTooltip);
-      g.addEventListener("click", (e) => {
-        e.stopPropagation();
-        selectSectorManually(sec.id);
-      });
+      sectorNodes.set(sec.id, { sec, group: g, poly, sublabel });
     });
 
-    // 5. Landmarks & Orange Line Metro Layer
-    if (state.showLandmarks) {
-      const lmG = svgEl("g", { "pointer-events": "none" }, vp);
+    // Event delegation across all 71 sector groups
+    sectorsLayerEl.addEventListener("pointerover", (e) => {
+      if (e.pointerType === "touch" || gestureDragged) return;
+      const g = e.target.closest(".sector-group");
+      if (!g) return;
+      const secId = g.dataset.id;
+      if (secId !== hoveredSectorId) {
+        hoveredSectorId = secId;
+        const sec = DATA.SECTOR_MAP[secId];
+        if (sec) showTooltip(sec, e);
+      }
+    });
 
-      // Orange line stops
-      DATA.METRO_STOPS.forEach((stop) => {
-        const p = latLngToSvg(stop.lat, stop.lng);
-        svgEl("circle", { cx: p.x, cy: p.y, r: 2.5, fill: "#fb923c", stroke: "#070e15", "stroke-width": 0.9 }, lmG);
-      });
+    sectorsLayerEl.addEventListener("pointermove", (e) => {
+      if (e.pointerType === "touch" || !hoveredSectorId || gestureDragged) return;
+      moveTooltip(e);
+    });
 
-      // Key Landmarks
-      DATA.LANDMARKS.forEach((lm) => {
-        const p = latLngToSvg(lm.lat, lm.lng);
-        svgEl("circle", { cx: p.x, cy: p.y, r: 3.1, fill: "#38bdf8", stroke: "#070e15", "stroke-width": 1.1 }, lmG);
-        const t = svgEl(
-          "text",
-          {
-            x: p.x + (lm.dx ?? 5),
-            y: p.y + (lm.dy ?? 3),
-            fill: "rgba(186, 230, 253, 0.88)",
-            "font-size": "7.2",
-            "font-weight": "600",
-            "text-anchor": lm.anchor || "start",
-            style: "text-shadow: 0 1px 3px #000;",
-          },
-          lmG
-        );
-        t.textContent = lm.name;
-      });
-    }
+    sectorsLayerEl.addEventListener("pointerout", (e) => {
+      if (e.pointerType === "touch") return;
+      const nextG = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest(".sector-group") : null;
+      if (!nextG) {
+        hoveredSectorId = null;
+        hideTooltip();
+      }
+    });
 
-    // 6. Home Base Radar + Active Route Trajectory Layer
-    const fxG = svgEl("g", { "pointer-events": "none" }, vp);
+    sectorsLayerEl.addEventListener("click", (e) => {
+      if (performance.now() < suppressClickUntil) return;
+      const g = e.target.closest(".sector-group");
+      if (!g) return;
+      selectSectorManually(g.dataset.id);
+    });
+
+    // 5. Landmarks & Orange Line Metro Layer (created once, toggled cleanly)
+    landmarksLayerEl = svgEl("g", { id: "landmarks-layer", "pointer-events": "none" }, vp);
+    DATA.METRO_STOPS.forEach((stop) => {
+      const p = latLngToSvg(stop.lat, stop.lng);
+      svgEl("circle", { cx: p.x, cy: p.y, r: 2.5, fill: "#fb923c", stroke: "#070e15", "stroke-width": 0.9 }, landmarksLayerEl);
+    });
+    DATA.LANDMARKS.forEach((lm) => {
+      const p = latLngToSvg(lm.lat, lm.lng);
+      svgEl("circle", { cx: p.x, cy: p.y, r: 3.1, fill: "#38bdf8", stroke: "#070e15", "stroke-width": 1.1 }, landmarksLayerEl);
+      const t = svgEl(
+        "text",
+        {
+          x: p.x + (lm.dx ?? 5),
+          y: p.y + (lm.dy ?? 3),
+          fill: "rgba(186, 230, 253, 0.88)",
+          "font-size": "7.2",
+          "font-weight": "600",
+          "text-anchor": lm.anchor || "start",
+          style: "text-shadow: 0 1px 3px #000;",
+        },
+        landmarksLayerEl
+      );
+      t.textContent = lm.name;
+    });
+
+    // 6. Dynamic Home Radar + Active Route Trajectory Layer
+    fxLayerEl = svgEl("g", { id: "fx-layer", "pointer-events": "none" }, vp);
+  }
+
+  function renderFxLayer(origin) {
+    if (!fxLayerEl) return;
+    fxLayerEl.innerHTML = "";
+
     const originPt = latLngToSvg(origin.lat, origin.lng);
-    svgEl("circle", { class: "home-ring", cx: originPt.x, cy: originPt.y, r: 10 }, fxG);
-    svgEl("circle", { cx: originPt.x, cy: originPt.y, r: 4.5, fill: "#34d399", stroke: "#042f2e", "stroke-width": 1.6 }, fxG);
+    svgEl("circle", { class: "home-ring", cx: originPt.x, cy: originPt.y, r: 10 }, fxLayerEl);
+    svgEl("circle", { cx: originPt.x, cy: originPt.y, r: 4.5, fill: "#34d399", stroke: "#042f2e", "stroke-width": 1.6 }, fxLayerEl);
+
     if (origin.isGps && originPt.x >= -20 && originPt.x <= 1340 && originPt.y >= -20 && originPt.y <= 900) {
       const gpsTxt = svgEl(
         "text",
@@ -856,74 +905,110 @@
           "font-weight": "700",
           style: "text-shadow: 0 1px 4px #000;",
         },
-        fxG
+        fxLayerEl
       );
       gpsTxt.textContent = "GPS";
     }
 
-    if (state.selectedSectorId) {
-      const target = DATA.SECTOR_MAP[state.selectedSectorId];
-      if (target) {
-        const targetPt = latLngToSvg(target.lat, target.lng);
-        svgEl("circle", { class: "beacon-ring", cx: targetPt.x, cy: targetPt.y, r: 14 }, fxG);
+    if (!state.selectedSectorId) return;
+    const target = DATA.SECTOR_MAP[state.selectedSectorId];
+    if (!target) return;
 
-        if (origin.isGps || target.id !== origin.sector) {
-          // Curved trajectory arc from H-11 to target
-          const midX = (originPt.x + targetPt.x) / 2;
-          const midY = (originPt.y + targetPt.y) / 2;
-          const dx = targetPt.x - originPt.x;
-          const dy = targetPt.y - originPt.y;
-          const len = Math.hypot(dx, dy) || 1;
-          const curveOffset = Math.min(48, len * 0.16);
-          const ctrlX = midX - (dy / len) * curveOffset;
-          const ctrlY = midY + (dx / len) * curveOffset;
-          const pathD = `M ${originPt.x.toFixed(1)} ${originPt.y.toFixed(1)} Q ${ctrlX.toFixed(1)} ${ctrlY.toFixed(1)} ${targetPt.x.toFixed(1)} ${targetPt.y.toFixed(1)}`;
+    const targetPt = latLngToSvg(target.lat, target.lng);
+    svgEl("circle", { class: "beacon-ring", cx: targetPt.x, cy: targetPt.y, r: 14 }, fxLayerEl);
 
-          svgEl("path", { class: "route-line-bg", d: pathD }, fxG);
-          svgEl("path", { class: "route-line-flow", d: pathD }, fxG);
+    if (origin.isGps || target.id !== origin.sector) {
+      // Curved trajectory arc from current Home Base to target
+      const midX = (originPt.x + targetPt.x) / 2;
+      const midY = (originPt.y + targetPt.y) / 2;
+      const dx = targetPt.x - originPt.x;
+      const dy = targetPt.y - originPt.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const curveOffset = Math.min(48, len * 0.16);
+      const ctrlX = midX - (dy / len) * curveOffset;
+      const ctrlY = midY + (dx / len) * curveOffset;
+      const pathD = `M ${originPt.x.toFixed(1)} ${originPt.y.toFixed(1)} Q ${ctrlX.toFixed(1)} ${ctrlY.toFixed(1)} ${targetPt.x.toFixed(1)} ${targetPt.y.toFixed(1)}`;
 
-          // Midpoint distance badge along the curve (at t=0.5 of quadratic bezier)
-          const labelX = 0.25 * originPt.x + 0.5 * ctrlX + 0.25 * targetPt.x;
-          const labelY = 0.25 * originPt.y + 0.5 * ctrlY + 0.25 * targetPt.y;
-          const info = computeTravelInfo(target);
-          const pillText = `${info.straightKm.toFixed(1)} km · ~${info.roadKm.toFixed(0)} km drive`;
-          const pillW = pillText.length * 6.4 + 18;
+      svgEl("path", { class: "route-line-bg", d: pathD }, fxLayerEl);
+      svgEl("path", { class: "route-line-flow", d: pathD }, fxLayerEl);
 
-          svgEl(
-            "rect",
-            {
-              x: labelX - pillW / 2,
-              y: labelY - 11,
-              width: pillW,
-              height: 21,
-              rx: 10.5,
-              fill: "rgba(9, 17, 26, 0.94)",
-              stroke: "#fbbf24",
-              "stroke-width": 1.3,
-            },
-            fxG
-          );
-          const badgeTxt = svgEl(
-            "text",
-            {
-              x: labelX,
-              y: labelY + 0.5,
-              fill: "#fde68a",
-              "font-family": "var(--font-mono)",
-              "font-size": "9.5",
-              "font-weight": "700",
-              "text-anchor": "middle",
-              "dominant-baseline": "central",
-            },
-            fxG
-          );
-          badgeTxt.textContent = pillText;
-        }
+      // Midpoint distance badge along the curve (at t=0.5 of quadratic bezier)
+      const labelX = 0.25 * originPt.x + 0.5 * ctrlX + 0.25 * targetPt.x;
+      const labelY = 0.25 * originPt.y + 0.5 * ctrlY + 0.25 * targetPt.y;
+      const info = computeTravelInfo(target);
+      const pillText = `${info.straightKm.toFixed(1)} km · ~${info.roadKm.toFixed(0)} km drive`;
+      const pillW = pillText.length * 6.4 + 18;
 
-        // Target pin dot
-        svgEl("circle", { cx: targetPt.x, cy: targetPt.y, r: 5.5, fill: "#fbbf24", stroke: "#070e15", "stroke-width": 1.8, filter: "url(#glow-amber)" }, fxG);
-      }
+      svgEl(
+        "rect",
+        {
+          x: labelX - pillW / 2,
+          y: labelY - 11,
+          width: pillW,
+          height: 21,
+          rx: 10.5,
+          fill: "rgba(9, 17, 26, 0.94)",
+          stroke: "#fbbf24",
+          "stroke-width": 1.3,
+        },
+        fxLayerEl
+      );
+      const badgeTxt = svgEl(
+        "text",
+        {
+          x: labelX,
+          y: labelY + 0.5,
+          fill: "#fde68a",
+          "font-family": "var(--font-mono)",
+          "font-size": "9.5",
+          "font-weight": "700",
+          "text-anchor": "middle",
+          "dominant-baseline": "central",
+        },
+        fxLayerEl
+      );
+      badgeTxt.textContent = pillText;
     }
+
+    // Target pin dot
+    svgEl("circle", { cx: targetPt.x, cy: targetPt.y, r: 5.5, fill: "#fbbf24", stroke: "#070e15", "stroke-width": 1.8, filter: "url(#glow-amber)" }, fxLayerEl);
+  }
+
+  function updateMapState() {
+    if (!sectorsLayerEl) return;
+    const eligibleIds = new Set(getEligibleSectors().map((s) => s.id));
+    const origin = getCurrentOrigin();
+
+    sectorNodes.forEach(({ sec, group, sublabel }) => {
+      const isHome = !origin.isGps && sec.id === origin.sector;
+      const isSelected = sec.id === state.selectedSectorId;
+      const isRowLit = state.rolledLetter === sec.letter && !state.selectedSectorId;
+      const isRowDimmed = Boolean(state.rolledLetter && sec.letter !== state.rolledLetter && !state.selectedSectorId);
+      const isExplored = state.explored.has(sec.id);
+      const isDimPool = !eligibleIds.has(sec.id) && !isSelected && !isHome;
+
+      group.classList.toggle("home-base", isHome);
+      group.classList.toggle("selected", isSelected);
+      group.classList.toggle("row-lit", isRowLit);
+      group.classList.toggle("row-dimmed", isRowDimmed);
+      group.classList.toggle("dimmed-pool", isDimPool);
+
+      if (isHome) {
+        sublabel.textContent = "HOME";
+        sublabel.style.fill = "#6ee7b7";
+      } else if (isExplored) {
+        sublabel.textContent = "✓";
+        sublabel.style.fill = "#34d399";
+      } else if (sublabel.textContent) {
+        sublabel.textContent = "";
+      }
+    });
+
+    if (landmarksLayerEl) {
+      landmarksLayerEl.style.display = state.showLandmarks ? "" : "none";
+    }
+
+    renderFxLayer(origin);
   }
 
   // ==================== Map Tooltip ====================
@@ -950,19 +1035,32 @@
   }
 
   function hideTooltip() {
+    hoveredSectorId = null;
     el.tooltip.classList.remove("visible");
   }
 
   // ==================== Map Pan & Zoom ====================
+  function getSvgMetrics() {
+    const rect = el.svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const unitsPerPx = Math.max(state.viewBox.w / rect.width, state.viewBox.h / rect.height);
+    const drawnW = state.viewBox.w / unitsPerPx;
+    const drawnH = state.viewBox.h / unitsPerPx;
+    const offX = (rect.width - drawnW) / 2;
+    const offY = (rect.height - drawnH) / 2;
+    return { rect, unitsPerPx, drawnW, drawnH, offX, offY };
+  }
+
   function applyViewBox() {
     const { x, y, w, h } = state.viewBox;
     el.svg.setAttribute("viewBox", `${x.toFixed(1)} ${y.toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}`);
   }
 
-  function zoomMap(factor, centerClient = null) {
-    const rect = el.svg.getBoundingClientRect();
-    const rx = centerClient ? (centerClient.x - rect.left) / rect.width : 0.5;
-    const ry = centerClient ? (centerClient.y - rect.top) / rect.height : 0.5;
+  function zoomMap(factor, centerClient = null, shouldPersist = true) {
+    const m = getSvgMetrics();
+    if (!m) return;
+    const rx = centerClient ? (centerClient.x - m.rect.left - m.offX) / m.drawnW : 0.5;
+    const ry = centerClient ? (centerClient.y - m.rect.top - m.offY) / m.drawnH : 0.5;
 
     const newW = Math.max(280, Math.min(1480, state.viewBox.w * factor));
     const newH = (newW * 880) / 1320;
@@ -974,7 +1072,7 @@
     state.viewBox.w = newW;
     state.viewBox.h = newH;
     applyViewBox();
-    persistState();
+    if (shouldPersist) persistState();
   }
 
   function resetMapView() {
@@ -1016,24 +1114,50 @@
   // ==================== Dice Rolling Engine ====================
   function renderDiceUI() {
     const letters = getEligibleLetters();
+    const allDoneUnexplored =
+      state.poolMode === "unexplored" && state.explored.size === DATA.SECTORS.length && letters.length === 0;
+
     el.letterPoolChips.innerHTML = "";
-    letters.forEach((L) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = `pool-chip ${state.rolledLetter === L ? "selected-letter" : ""}`;
-      btn.textContent = L;
-      btn.title = `Lock Letter ${L} row`;
-      btn.addEventListener("click", () => {
-        if (state.isRolling) return;
-        lockLetter(L);
+    if (!letters.length) {
+      const msg = document.createElement("span");
+      msg.className = `pool-empty-msg${allDoneUnexplored ? " complete" : ""}`;
+      msg.textContent = allDoneUnexplored
+        ? `All ${DATA.SECTORS.length} sectors explored!`
+        : "No sectors match this filter";
+      el.letterPoolChips.appendChild(msg);
+
+      if (allDoneUnexplored) {
+        const showAllBtn = document.createElement("button");
+        showAllBtn.type = "button";
+        showAllBtn.className = "pool-chip action-chip";
+        showAllBtn.textContent = "Show All (71)";
+        showAllBtn.addEventListener("click", () => setPoolMode("all"));
+        el.letterPoolChips.appendChild(showAllBtn);
+      }
+    } else {
+      letters.forEach((L) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `pool-chip ${state.rolledLetter === L ? "selected-letter" : ""}`;
+        btn.textContent = L;
+        btn.title = `Lock Letter ${L} row`;
+        btn.addEventListener("click", () => {
+          if (state.isRolling) return;
+          lockLetter(L);
+        });
+        el.letterPoolChips.appendChild(btn);
       });
-      el.letterPoolChips.appendChild(btn);
-    });
+    }
 
     const nums = getEligibleNumbersForLetter(state.rolledLetter);
     el.numberPoolChips.innerHTML = "";
-    if (!state.rolledLetter) {
-      el.numberPoolChips.innerHTML = `<span style="font-size:0.68rem;color:var(--text-muted);">Roll Letter first to unlock numbers</span>`;
+    if (!letters.length && !state.rolledLetter) {
+      el.numberPoolChips.innerHTML = `<span class="pool-empty-msg">Switch filter or unmark a sector</span>`;
+    } else if (!state.rolledLetter) {
+      el.numberPoolChips.innerHTML = `<span class="pool-empty-msg">Roll Letter first to unlock numbers</span>`;
+    } else if (!nums.length) {
+      const poolAdj = state.poolMode === "unexplored" ? "unexplored " : "";
+      el.numberPoolChips.innerHTML = `<span class="pool-empty-msg">No ${poolAdj}sectors left in Row ${state.rolledLetter} — roll Letter again</span>`;
     } else {
       nums.forEach((n) => {
         const btn = document.createElement("button");
@@ -1055,17 +1179,32 @@
     el.letterDie.classList.toggle("landed-letter", Boolean(state.rolledLetter));
     el.numberDie.classList.toggle("landed-number", state.rolledNumber !== null);
 
-    el.rollNumberBtn.disabled = !state.rolledLetter || state.isRolling;
-    el.rollLetterBtn.disabled = state.isRolling;
-    el.rollBothBtn.disabled = state.isRolling;
+    const canRollLetter = !state.isRolling && letters.length > 0;
+    const canRollNumber = !state.isRolling && Boolean(state.rolledLetter) && nums.length > 0;
 
-    el.letterDieCol.classList.toggle("active-step", !state.rolledLetter);
+    el.rollLetterBtn.disabled = !canRollLetter;
+    el.rollNumberBtn.disabled = !canRollNumber;
+    el.rollBothBtn.disabled = !canRollLetter;
+    el.rollBothBtn.classList.toggle("rolling", state.isRolling);
+
+    el.letterDie.classList.toggle("disabled-die", !canRollLetter && !state.isRolling);
+    el.numberDie.classList.toggle("disabled-die", !canRollNumber && !state.isRolling);
+    el.letterDie.setAttribute("aria-disabled", String(!canRollLetter));
+    el.numberDie.setAttribute("aria-disabled", String(!canRollNumber));
+
+    el.letterDieCol.classList.toggle("active-step", !state.rolledLetter && letters.length > 0);
     el.letterDieCol.classList.toggle("locked-step", Boolean(state.rolledLetter));
-    el.numberDieCol.classList.toggle("active-step", Boolean(state.rolledLetter) && state.rolledNumber === null);
+    el.numberDieCol.classList.toggle("active-step", Boolean(state.rolledLetter) && state.rolledNumber === null && nums.length > 0);
     el.numberDieCol.classList.toggle("locked-step", state.rolledNumber !== null);
 
-    if (state.selectedSectorId) {
-      el.stepPill.textContent = `Rolled: ${state.selectedSectorId}`;
+    if (allDoneUnexplored && !state.selectedSectorId) {
+      el.stepPill.textContent = `All ${DATA.SECTORS.length} Explored!`;
+      el.stepPill.classList.add("lit");
+    } else if (state.selectedSectorId) {
+      el.stepPill.textContent = `Selected: ${state.selectedSectorId}`;
+      el.stepPill.classList.add("lit");
+    } else if (state.rolledLetter && !nums.length) {
+      el.stepPill.textContent = `Row ${state.rolledLetter} Empty · Roll Letter`;
       el.stepPill.classList.add("lit");
     } else if (state.rolledLetter) {
       el.stepPill.textContent = `Row ${state.rolledLetter} Lit · Step 2: Roll Number`;
@@ -1098,9 +1237,10 @@
     state.rolledLetter = letter;
     state.rolledNumber = null;
     state.selectedSectorId = null;
+    syncUrlHash(null);
     playTick(440, 0.06, 0.07);
     renderDiceUI();
-    renderMap();
+    updateMapState();
     renderFieldGuide(null);
     persistState();
     el.mapToast.textContent = `Row ${letter} illuminated! Now roll the Number die.`;
@@ -1109,9 +1249,19 @@
   function rollLetterDie() {
     if (state.isRolling) return Promise.resolve(null);
     const pool = getEligibleLetters();
+    if (!pool.length) {
+      el.mapToast.textContent =
+        state.poolMode === "unexplored"
+          ? `All ${DATA.SECTORS.length} sectors explored! Switch filter to All (71) to keep rolling.`
+          : "No eligible letters in the active filter.";
+      renderDiceUI();
+      return Promise.resolve(null);
+    }
+
     state.isRolling = true;
     state.rolledNumber = null;
     state.selectedSectorId = null;
+    syncUrlHash(null);
     el.letterDie.classList.add("rolling");
     renderDiceUI();
 
@@ -1138,12 +1288,19 @@
   function rollNumberDie() {
     if (state.isRolling || !state.rolledLetter) return Promise.resolve(null);
     const pool = getEligibleNumbersForLetter(state.rolledLetter);
+    if (!pool.length) {
+      el.mapToast.textContent = `No eligible sectors left in Row ${state.rolledLetter} — roll Letter again.`;
+      renderDiceUI();
+      return Promise.resolve(null);
+    }
+
     state.isRolling = true;
     state.rolledNumber = null;
     state.selectedSectorId = null;
+    syncUrlHash(null);
     el.numberDie.classList.add("rolling");
     renderDiceUI();
-    renderMap();
+    updateMapState();
 
     return new Promise((resolve) => {
       let ticks = 0;
@@ -1168,9 +1325,33 @@
 
   async function rollBothSequence() {
     if (state.isRolling) return;
-    await rollLetterDie();
+    const letter = await rollLetterDie();
+    if (!letter) return;
     await new Promise((r) => setTimeout(r, 380));
     await rollNumberDie();
+  }
+
+  let mobileScrollTimer = null;
+
+  function scrollBehaviorPref() {
+    return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+  }
+
+  function maybeScrollToFieldGuide(delayMs = 100) {
+    if (!window.matchMedia || !window.matchMedia("(max-width: 1020px)").matches) return;
+    if (mobileScrollTimer) clearTimeout(mobileScrollTimer);
+    mobileScrollTimer = setTimeout(() => {
+      mobileScrollTimer = null;
+      if (el.fieldGuide && typeof el.fieldGuide.scrollIntoView === "function") {
+        el.fieldGuide.scrollIntoView({ behavior: scrollBehaviorPref(), block: "start" });
+      }
+    }, delayMs);
+  }
+
+  function scrollToMapView() {
+    if (el.mapStage && typeof el.mapStage.scrollIntoView === "function") {
+      el.mapStage.scrollIntoView({ behavior: scrollBehaviorPref(), block: "start" });
+    }
   }
 
   function finalizeSector(id, addToHistory = false) {
@@ -1187,8 +1368,9 @@
       playTick(540, 0.06, 0.06);
     }
 
+    syncUrlHash(sec.id);
     renderDiceUI();
-    renderMap();
+    updateMapState();
     renderFieldGuide(sec);
     if (state.focusRoute) {
       focusOnRoute(sec.id);
@@ -1201,6 +1383,8 @@
       !origin.isGps && sec.id === origin.sector
         ? `${sec.id} · Home Base Selected (${origin.shortLabel})`
         : `${sec.id} lit up! ${info.straightKm.toFixed(1)} km ${info.bearing.dir} (~${info.roadKm.toFixed(0)} km drive from ${origin.shortLabel})`;
+
+    maybeScrollToFieldGuide(addToHistory ? 220 : 80);
   }
 
   function selectSectorManually(id) {
@@ -1215,15 +1399,55 @@
     state.selectedSectorId = null;
     state.focusRoute = false;
     el.focusRouteBtn.classList.remove("active");
+    syncUrlHash(null);
     resetMapView();
     renderDiceUI();
-    renderMap();
+    updateMapState();
     renderFieldGuide(null);
     persistState();
     el.mapToast.textContent = "Reset complete · Click any sector or roll Letter → Number";
   }
 
   // ==================== Field Guide Rendering ====================
+  const EXTRA_NEIGHBORS = {
+    "B-17": ["C-16", "D-17"],
+    "C-16": ["B-17"],
+    "D-17": ["B-17"],
+  };
+
+  function getAdjacentSectors(sec) {
+    const neighbors = [];
+    const seen = new Set();
+
+    // Standard Doxiadis grid neighbors
+    const gridCandidates = [
+      { dir: "N", r: sec.rowIdx - 1, c: sec.colIdx },
+      { dir: "S", r: sec.rowIdx + 1, c: sec.colIdx },
+      { dir: "E", r: sec.rowIdx, c: sec.colIdx - 1 },
+      { dir: "W", r: sec.rowIdx, c: sec.colIdx + 1 },
+    ];
+    gridCandidates.forEach(({ dir, r, c }) => {
+      const match = DATA.SECTORS.find((x) => x.rowIdx === r && x.colIdx === c);
+      if (match && !seen.has(match.id)) {
+        seen.add(match.id);
+        neighbors.push({ dir, sec: match });
+      }
+    });
+
+    // Geographic approach neighbors for off-grid Zone II sectors (e.g. B-17)
+    const extraIds = EXTRA_NEIGHBORS[sec.id] || [];
+    extraIds.forEach((nId) => {
+      const match = DATA.SECTOR_MAP[nId];
+      if (match && !seen.has(match.id)) {
+        seen.add(match.id);
+        const { dir } = bearingCompass(sec.lat, sec.lng, match.lat, match.lng);
+        neighbors.push({ dir, sec: match });
+      }
+    });
+
+    return neighbors;
+  }
+
   function renderFieldGuide(sec) {
     if (!sec) {
       const origin = getCurrentOrigin();
@@ -1279,19 +1503,7 @@
     const statusTone = DATA.STATUS_META[sec.status]?.tier || "active";
     const isExplored = state.explored.has(sec.id);
     const isThisHome = origin.sector === sec.id && !origin.isGps;
-
-    // Find valid N/S/E/W grid neighbors
-    const neighborCandidates = [
-      { dir: "N", r: sec.rowIdx - 1, c: sec.colIdx },
-      { dir: "S", r: sec.rowIdx + 1, c: sec.colIdx },
-      { dir: "E", r: sec.rowIdx, c: sec.colIdx - 1 },
-      { dir: "W", r: sec.rowIdx, c: sec.colIdx + 1 },
-    ];
-    const neighbors = [];
-    neighborCandidates.forEach(({ dir, r, c }) => {
-      const match = DATA.SECTORS.find((x) => x.rowIdx === r && x.colIdx === c);
-      if (match) neighbors.push({ dir, sec: match });
-    });
+    const neighbors = getAdjacentSectors(sec);
 
     const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${sec.lat},${sec.lng}`;
     const gdirUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${sec.lat},${sec.lng}`;
@@ -1311,6 +1523,7 @@
           </div>
         </div>
         <div class="guide-top-actions">
+          <button id="scroll-to-map-btn" class="back-to-map-btn" type="button">↑ View Map</button>
           <button id="set-home-btn" class="set-home-btn ${isThisHome ? "is-home" : ""}" type="button" ${isThisHome ? "disabled" : ""}>
             ${isThisHome ? "⌂ Home Base ✓" : "⌂ Set as Home"}
           </button>
@@ -1384,6 +1597,11 @@
       </div>
     `;
 
+    const scrollToMapBtn = document.getElementById("scroll-to-map-btn");
+    if (scrollToMapBtn) {
+      scrollToMapBtn.addEventListener("click", scrollToMapView);
+    }
+
     const setHomeBtn = document.getElementById("set-home-btn");
     if (setHomeBtn && !isThisHome) {
       setHomeBtn.addEventListener("click", () => {
@@ -1397,7 +1615,7 @@
       persistState();
       renderFieldGuide(sec);
       renderDiceUI();
-      renderMap();
+      updateMapState();
     });
 
     el.fieldGuide.querySelectorAll("[data-jump]").forEach((btn) => {
@@ -1503,10 +1721,33 @@
 
     el.atlasGrid.querySelectorAll("[data-atlas-id]").forEach((card) => {
       card.addEventListener("click", () => {
-        el.atlasBackdrop.classList.remove("open");
+        closeAtlasModal({ restoreFocus: false });
         selectSectorManually(card.dataset.atlasId);
       });
     });
+  }
+
+  let lastFocusedBeforeAtlas = null;
+
+  function openAtlasModal() {
+    lastFocusedBeforeAtlas = document.activeElement;
+    renderAtlas();
+    el.atlasBackdrop.classList.add("open");
+    el.atlasSearch.focus();
+  }
+
+  function closeAtlasModal({ restoreFocus = true } = {}) {
+    if (!el.atlasBackdrop.classList.contains("open")) return;
+    el.atlasBackdrop.classList.remove("open");
+    if (
+      restoreFocus &&
+      lastFocusedBeforeAtlas &&
+      typeof lastFocusedBeforeAtlas.focus === "function" &&
+      document.contains(lastFocusedBeforeAtlas)
+    ) {
+      lastFocusedBeforeAtlas.focus();
+    }
+    lastFocusedBeforeAtlas = null;
   }
 
   // ==================== Home Base Management ====================
@@ -1602,7 +1843,7 @@
     populateHomeSpotSelect();
     syncOriginUI();
     persistState();
-    renderMap();
+    updateMapState();
     renderFieldGuide(state.selectedSectorId ? DATA.SECTOR_MAP[state.selectedSectorId] : null);
     if (el.atlasBackdrop.classList.contains("open")) {
       renderAtlas();
@@ -1676,8 +1917,177 @@
     );
   }
 
+  function setPoolMode(mode) {
+    if (!VALID_POOLS.has(mode)) return;
+    state.poolMode = mode;
+    el.poolPills.forEach((p) => p.classList.toggle("active", p.dataset.pool === mode));
+    if (state.rolledLetter && !getEligibleLetters().includes(state.rolledLetter)) {
+      state.rolledLetter = null;
+      state.rolledNumber = null;
+      state.selectedSectorId = null;
+      syncUrlHash(null);
+    }
+    persistState();
+    renderDiceUI();
+    updateMapState();
+    renderFieldGuide(state.selectedSectorId ? DATA.SECTOR_MAP[state.selectedSectorId] : null);
+  }
+
+  function setupMapPointerGestures() {
+    const activePointers = new Map();
+    let panPointerId = null;
+    let gestureMode = "none"; // "none" | "pan" | "pinch"
+    let prevPinchDist = 0;
+    let prevPinchMid = { x: 0, y: 0 };
+
+    function resetGestures(shouldPersist = false) {
+      const didDrag = gestureDragged;
+      activePointers.clear();
+      panPointerId = null;
+      gestureMode = "none";
+      gestureDragged = false;
+      el.svg.classList.remove("is-panning");
+      if (didDrag && shouldPersist) {
+        persistState();
+      }
+    }
+
+    el.svg.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      hideTooltip();
+
+      activePointers.set(e.pointerId, {
+        x: e.clientX,
+        y: e.clientY,
+        startX: e.clientX,
+        startY: e.clientY,
+        lastX: e.clientX,
+        lastY: e.clientY,
+        type: e.pointerType,
+      });
+
+      if (activePointers.size === 1) {
+        panPointerId = e.pointerId;
+        gestureMode = "pan";
+        gestureDragged = false;
+      } else if (activePointers.size === 2) {
+        gestureMode = "pinch";
+        gestureDragged = true;
+        panPointerId = null;
+        const pts = Array.from(activePointers.values());
+        prevPinchDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+        prevPinchMid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+        for (const pid of activePointers.keys()) {
+          try {
+            el.svg.setPointerCapture(pid);
+          } catch {
+            // ignore capture errors
+          }
+        }
+      }
+    });
+
+    window.addEventListener("pointermove", (e) => {
+      if (!activePointers.has(e.pointerId)) return;
+      const ptr = activePointers.get(e.pointerId);
+      ptr.x = e.clientX;
+      ptr.y = e.clientY;
+
+      if (gestureMode === "pinch" && activePointers.size >= 2) {
+        const pts = Array.from(activePointers.values());
+        const currDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+        const currMid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+        const m = getSvgMetrics();
+
+        if (m) {
+          state.viewBox.x -= (currMid.x - prevPinchMid.x) * m.unitsPerPx;
+          state.viewBox.y -= (currMid.y - prevPinchMid.y) * m.unitsPerPx;
+          if (prevPinchDist > 10 && currDist > 10) {
+            zoomMap(prevPinchDist / currDist, currMid, false);
+          } else {
+            applyViewBox();
+          }
+        }
+
+        prevPinchDist = currDist;
+        prevPinchMid = currMid;
+        return;
+      }
+
+      if (gestureMode === "pan" && e.pointerId === panPointerId) {
+        if (!gestureDragged && Math.hypot(e.clientX - ptr.startX, e.clientY - ptr.startY) > 6) {
+          gestureDragged = true;
+          hideTooltip();
+          el.svg.classList.add("is-panning");
+          try {
+            el.svg.setPointerCapture(e.pointerId);
+          } catch {
+            // ignore capture errors
+          }
+        }
+
+        if (gestureDragged) {
+          const m = getSvgMetrics();
+          if (m) {
+            state.viewBox.x -= (e.clientX - ptr.lastX) * m.unitsPerPx;
+            state.viewBox.y -= (e.clientY - ptr.lastY) * m.unitsPerPx;
+            applyViewBox();
+          }
+        }
+
+        ptr.lastX = e.clientX;
+        ptr.lastY = e.clientY;
+      }
+    });
+
+    function onPointerEnd(e) {
+      if (!activePointers.has(e.pointerId)) return;
+      activePointers.delete(e.pointerId);
+      try {
+        if (el.svg.hasPointerCapture && el.svg.hasPointerCapture(e.pointerId)) {
+          el.svg.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        // ignore release errors
+      }
+
+      if (gestureMode === "pinch") {
+        if (activePointers.size === 1) {
+          const [remId, remPtr] = activePointers.entries().next().value;
+          panPointerId = remId;
+          remPtr.lastX = remPtr.x;
+          remPtr.lastY = remPtr.y;
+          gestureMode = "pan";
+          return;
+        }
+        if (activePointers.size === 0) {
+          suppressClickUntil = performance.now() + 120;
+          resetGestures(true);
+        }
+        return;
+      }
+
+      if (gestureMode === "pan" && (e.pointerId === panPointerId || activePointers.size === 0)) {
+        const wasDragged = gestureDragged;
+        gestureMode = "none";
+        panPointerId = null;
+        gestureDragged = false;
+        el.svg.classList.remove("is-panning");
+        if (wasDragged) {
+          suppressClickUntil = performance.now() + 120;
+          persistState();
+        }
+      }
+    }
+
+    window.addEventListener("pointerup", onPointerEnd);
+    window.addEventListener("pointercancel", onPointerEnd);
+    window.addEventListener("blur", () => resetGestures(true));
+  }
+
   // ==================== Event Bindings & Init ====================
   function init() {
+    initMap();
     populateHomeSectorSelect();
     populateHomeSpotSelect();
     syncOriginUI();
@@ -1723,20 +2133,7 @@
     });
 
     el.poolPills.forEach((pill) => {
-      pill.addEventListener("click", () => {
-        el.poolPills.forEach((p) => p.classList.remove("active"));
-        pill.classList.add("active");
-        state.poolMode = pill.dataset.pool;
-        if (state.rolledLetter && !getEligibleLetters().includes(state.rolledLetter)) {
-          state.rolledLetter = null;
-          state.rolledNumber = null;
-          state.selectedSectorId = null;
-        }
-        persistState();
-        renderDiceUI();
-        renderMap();
-        renderFieldGuide(state.selectedSectorId ? DATA.SECTOR_MAP[state.selectedSectorId] : null);
-      });
+      pill.addEventListener("click", () => setPoolMode(pill.dataset.pool));
     });
 
     // Map Zoom / Pan / Controls
@@ -1744,8 +2141,17 @@
       state.showLandmarks = !state.showLandmarks;
       el.toggleLandmarksBtn.classList.toggle("active", state.showLandmarks);
       persistState();
-      renderMap();
+      updateMapState();
     });
+
+    if (el.toggleLegendBtn && el.mapLegend) {
+      el.toggleLegendBtn.addEventListener("click", () => {
+        const isOpen = el.mapLegend.classList.toggle("mobile-open");
+        el.toggleLegendBtn.classList.toggle("active", isOpen);
+        el.toggleLegendBtn.setAttribute("aria-expanded", String(isOpen));
+        el.toggleLegendBtn.textContent = isOpen ? "Legend ▴" : "Legend ▾";
+      });
+    }
 
     el.focusRouteBtn.addEventListener("click", () => {
       state.focusRoute = !state.focusRoute;
@@ -1770,35 +2176,14 @@
       "wheel",
       (e) => {
         e.preventDefault();
+        hideTooltip();
         const factor = e.deltaY < 0 ? 0.88 : 1.13;
         zoomMap(factor, { x: e.clientX, y: e.clientY });
       },
       { passive: false }
     );
 
-    el.svg.addEventListener("mousedown", (e) => {
-      if (e.target.closest(".sector-group")) return;
-      state.isPanning = true;
-      state.panStart = { x: e.clientX, y: e.clientY };
-    });
-
-    window.addEventListener("mousemove", (e) => {
-      if (!state.isPanning) return;
-      const rect = el.svg.getBoundingClientRect();
-      const dx = ((e.clientX - state.panStart.x) / rect.width) * state.viewBox.w;
-      const dy = ((e.clientY - state.panStart.y) / rect.height) * state.viewBox.h;
-      state.viewBox.x -= dx;
-      state.viewBox.y -= dy;
-      state.panStart = { x: e.clientX, y: e.clientY };
-      applyViewBox();
-    });
-
-    window.addEventListener("mouseup", () => {
-      if (state.isPanning) {
-        state.isPanning = false;
-        persistState();
-      }
-    });
+    setupMapPointerGestures();
 
     // Dice Buttons
     el.rollLetterBtn.addEventListener("click", rollLetterDie);
@@ -1823,13 +2208,10 @@
     el.resetDiceBtn.addEventListener("click", resetDice);
 
     // Atlas Modal
-    el.openAtlasBtn.addEventListener("click", () => {
-      renderAtlas();
-      el.atlasBackdrop.classList.add("open");
-    });
-    el.closeAtlasBtn.addEventListener("click", () => el.atlasBackdrop.classList.remove("open"));
+    el.openAtlasBtn.addEventListener("click", openAtlasModal);
+    el.closeAtlasBtn.addEventListener("click", () => closeAtlasModal());
     el.atlasBackdrop.addEventListener("click", (e) => {
-      if (e.target === el.atlasBackdrop) el.atlasBackdrop.classList.remove("open");
+      if (e.target === el.atlasBackdrop) closeAtlasModal();
     });
     el.atlasSearch.addEventListener("input", () => {
       renderAtlas();
@@ -1844,12 +2226,39 @@
       persistState();
     });
 
-    window.addEventListener("beforeunload", persistState);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (el.atlasBackdrop.classList.contains("open")) {
+          e.preventDefault();
+          closeAtlasModal();
+          return;
+        }
+        if (el.searchResults.classList.contains("open")) {
+          el.searchResults.classList.remove("open");
+          el.sectorSearch.blur();
+        }
+      }
+    });
+
+    window.addEventListener("hashchange", () => {
+      if (state.isRolling) return;
+      const hashSecId = parseHashSectorId();
+      if (hashSecId) {
+        if (hashSecId !== state.selectedSectorId) {
+          finalizeSector(hashSecId, false);
+        }
+      } else if (state.selectedSectorId) {
+        resetDice();
+      }
+    });
 
     setupSearch();
     renderDiceUI();
-    renderMap();
+    updateMapState();
     const initialSec = state.selectedSectorId ? DATA.SECTOR_MAP[state.selectedSectorId] : null;
+    if (initialSec) {
+      syncUrlHash(initialSec.id);
+    }
     renderFieldGuide(initialSec);
     if (state.focusRoute && initialSec) {
       focusOnRoute(initialSec.id);
@@ -1861,6 +2270,8 @@
       el.mapToast.textContent =
         !origin.isGps && initialSec.id === origin.sector
           ? `${initialSec.id} · Home Base (${origin.shortLabel})`
+          : initialHashSectorId
+          ? `Opened shared link ${initialSec.id} · Measuring from ${origin.shortLabel}`
           : `Restored ${initialSec.id} · Measuring from ${origin.shortLabel}`;
     } else if (state.rolledLetter) {
       el.mapToast.textContent = `Restored Row ${state.rolledLetter} · Roll Number to pick a sector`;

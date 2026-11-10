@@ -30,16 +30,16 @@
         </div>
       </div>
 
-      <div class="topbar-controls">
-        <div class="origin-pill" title="Select any sector first, then pinpoint precisely where inside that sector">
-          <span class="origin-dot"></span>
-          <span class="origin-prefix">Home:</span>
-          <select id="home-sector-select" class="origin-select origin-sector-select" aria-label="Choose your Home Base sector (all 71 Islamabad sectors)"></select>
-          <span class="origin-sep" aria-hidden="true">›</span>
-          <select id="home-spot-select" class="origin-select origin-spot-select" aria-label="Choose precisely where inside the chosen sector"></select>
-          <button id="use-gps-btn" class="origin-gps-btn" type="button" title="Use browser GPS as Home Base">GPS</button>
-        </div>
+      <div class="origin-pill" title="Select any sector first, then pinpoint precisely where inside that sector">
+        <span class="origin-dot"></span>
+        <span class="origin-prefix">Home:</span>
+        <select id="home-sector-select" class="origin-select origin-sector-select" aria-label="Choose your Home Base sector (all 71 Islamabad sectors)"></select>
+        <span class="origin-sep" aria-hidden="true">›</span>
+        <select id="home-spot-select" class="origin-select origin-spot-select" aria-label="Choose precisely where inside the chosen sector"></select>
+        <button id="use-gps-btn" class="origin-gps-btn" type="button" title="Use browser GPS as Home Base">GPS</button>
+      </div>
 
+      <div class="topbar-actions">
         <button id="sound-toggle-btn" class="top-btn active" type="button" title="Toggle dice sound effects">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
@@ -55,7 +55,7 @@
             <rect x="14" y="14" width="7" height="7"></rect>
             <rect x="3" y="14" width="7" height="7"></rect>
           </svg>
-          All 71 Sectors
+          <span><span class="atlas-btn-prefix">All </span>71 Sectors</span>
         </button>
       </div>
     </header>
@@ -121,7 +121,7 @@
         <div id="map-tooltip" class="map-tooltip" aria-hidden="true"></div>
 
         <div class="map-overlay-bottom">
-          <div class="map-legend">
+          <div id="map-legend" class="map-legend">
             <span class="legend-item"><span class="legend-swatch" style="background:#34d399;"></span><span id="legend-home-label">Home (H-11/4)</span></span>
             <span class="legend-item"><span class="legend-swatch" style="background:#2dd4bf;"></span>Rolled Letter Row</span>
             <span class="legend-item"><span class="legend-swatch" style="background:#fbbf24;"></span>Selected Sector</span>
@@ -129,7 +129,12 @@
             <span class="legend-item"><span class="legend-swatch" style="background:#22c55e;"></span>Parks / Hills</span>
             <span class="legend-item"><span class="legend-swatch" style="background:#475569;"></span>Raw / Developing</span>
           </div>
-          <div id="map-status-toast" class="map-status-toast">Click any sector or roll the dice →</div>
+          <div class="map-bottom-bar">
+            <button id="toggle-legend-btn" class="legend-toggle-btn" type="button" aria-expanded="false" aria-controls="map-legend">
+              Legend ▾
+            </button>
+            <div id="map-status-toast" class="map-status-toast">Click any sector or roll the dice →</div>
+          </div>
         </div>
       </section>
 
