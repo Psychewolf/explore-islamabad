@@ -24,8 +24,9 @@
   const LEGACY_HISTORY = "isb_dice_history_v1";
   const LEGACY_GPS = "isb_dice_gps_v1";
 
-  const VALID_POOLS = new Set(["all", "active", "hangout", "unexplored"]);
+  const VALID_POOLS = new Set(["all", "active", "hangout", "unexplored", "nearby", "metro"]);
   const VALID_SORTS = new Set(["distance", "grid", "hangout"]);
+  const NEARBY_RADIUS_KM = 5.0;
 
   function loadJson(key, fallback) {
     try {
@@ -165,19 +166,9 @@
     };
   }
 
-  function parseHashSectorId(hashStr = window.location.hash) {
-    if (!hashStr) return null;
-    let raw = hashStr.replace(/^#/, "").trim();
-    if (!raw) return null;
-    if (raw.toLowerCase().startsWith("sector=")) {
-      raw = raw.slice(7);
-    }
-    try {
-      raw = decodeURIComponent(raw);
-    } catch {
-      // ignore malformed URI sequence
-    }
-    const clean = raw.trim().toUpperCase();
+  function normalizeSectorToken(tok) {
+    if (!tok) return null;
+    const clean = String(tok).trim().toUpperCase();
     if (DATA.SECTOR_MAP[clean]) return clean;
     const m = clean.match(/^([B-I])-?(\d{1,2})$/);
     if (m) {
@@ -187,19 +178,164 @@
     return null;
   }
 
+  function parseOriginParam(fromVal) {
+    if (!fromVal || typeof fromVal !== "string") return null;
+    const trimmed = fromVal.trim();
+    if (!trimmed) return null;
+    if (trimmed.toLowerCase().startsWith("gps:")) {
+      const coords = trimmed.slice(4).split(",");
+      if (coords.length === 2) {
+        const lat = parseFloat(coords[0]);
+        const lng = parseFloat(coords[1]);
+        if (Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+          return { mode: "gps", lat: +lat.toFixed(5), lng: +lng.toFixed(5) };
+        }
+      }
+      return null;
+    }
+    const colonIdx = trimmed.indexOf(":");
+    const rawSec = colonIdx >= 0 ? trimmed.slice(0, colonIdx) : trimmed;
+    const rawSpot = colonIdx >= 0 ? trimmed.slice(colonIdx + 1).trim() : "";
+    const sectorId = normalizeSectorToken(rawSec);
+    if (!sectorId) return null;
+    const spots = DATA.getSubLocationsForSector(sectorId);
+    let spotId = null;
+    if (rawSpot) {
+      const match = spots.find((sp) => sp.id.toLowerCase() === rawSpot.toLowerCase());
+      if (match) spotId = match.id;
+    }
+    if (!spotId) {
+      const fallback = DATA.getDefaultSpotForSector(sectorId);
+      spotId = fallback ? fallback.id : spots[0]?.id || null;
+    }
+    return { mode: "sector", sectorId, spotId };
+  }
+
+  function parseHashState(hashStr = window.location.hash, searchStr = window.location.search) {
+    let raw = (hashStr || "").replace(/^#/, "").trim();
+    let fromParam = null;
+
+    if (searchStr) {
+      try {
+        const sp = new URLSearchParams(searchStr);
+        if (sp.has("from")) fromParam = sp.get("from");
+      } catch {
+        // ignore search parse errors
+      }
+    }
+
+    if (!raw) {
+      return {
+        sectorId: null,
+        fromSpec: parseOriginParam(fromParam),
+      };
+    }
+
+    let sectorPart = raw;
+    let queryPart = "";
+    const qIdx = raw.indexOf("?");
+    const aIdx = raw.indexOf("&");
+    if (qIdx >= 0) {
+      sectorPart = raw.slice(0, qIdx);
+      queryPart = raw.slice(qIdx + 1);
+    } else if (aIdx >= 0) {
+      sectorPart = raw.slice(0, aIdx);
+      queryPart = raw.slice(aIdx + 1);
+    } else if (raw.includes("=")) {
+      queryPart = raw;
+      sectorPart = "";
+    }
+
+    if (queryPart) {
+      try {
+        const qp = new URLSearchParams(queryPart);
+        if (qp.has("sector")) sectorPart = qp.get("sector");
+        if (qp.has("from")) fromParam = qp.get("from");
+      } catch {
+        // ignore query parse errors
+      }
+    } else if (sectorPart.toLowerCase().startsWith("sector=")) {
+      sectorPart = sectorPart.slice(7);
+    }
+
+    try {
+      sectorPart = decodeURIComponent(sectorPart);
+    } catch {
+      // ignore malformed URI sequence
+    }
+
+    return {
+      sectorId: normalizeSectorToken(sectorPart),
+      fromSpec: parseOriginParam(fromParam),
+    };
+  }
+
+  function encodeOriginParam(origin = null) {
+    if (origin) {
+      return origin.isGps
+        ? `gps:${origin.lat.toFixed(4)},${origin.lng.toFixed(4)}`
+        : origin.spotId
+        ? `${origin.sector}:${origin.spotId}`
+        : origin.sector;
+    }
+    if (state.homeMode === "gps" && state.gpsOrigin) {
+      return `gps:${state.gpsOrigin.lat.toFixed(4)},${state.gpsOrigin.lng.toFixed(4)}`;
+    }
+    return state.homeSpotId ? `${state.homeSectorId}:${state.homeSpotId}` : state.homeSectorId;
+  }
+
+  function buildUrlHash(sectorId, origin = null) {
+    if (!sectorId) return "";
+    return `#${sectorId}?from=${encodeOriginParam(origin)}`;
+  }
+
+  function buildShareUrl(sectorId, origin = null) {
+    const hash = buildUrlHash(sectorId, origin);
+    const base = window.location.href.split("#")[0];
+    return `${base}${hash}`;
+  }
+
   function syncUrlHash(sectorId) {
-    const targetHash = sectorId ? `#${sectorId}` : "";
+    const targetHash = buildUrlHash(sectorId);
     if (window.location.hash === targetHash) return;
     try {
       const baseUrl = window.location.pathname + window.location.search;
       history.replaceState(null, "", targetHash ? `${baseUrl}${targetHash}` : baseUrl);
     } catch {
-      if (targetHash) window.location.hash = targetHash;
+      if (targetHash) {
+        window.location.hash = targetHash;
+      } else if (window.location.hash) {
+        window.location.hash = "";
+      }
     }
   }
 
   const initial = loadPersistedState();
-  const initialHashSectorId = parseHashSectorId();
+  const persistedHomeSnapshot = {
+    homeMode: initial.homeMode,
+    homeSectorId: initial.homeSectorId,
+    homeSpotId: initial.homeSpotId,
+    homeSpotBySector: { ...initial.homeSpotBySector },
+    gpsOrigin: initial.gpsOrigin ? { ...initial.gpsOrigin } : null,
+  };
+
+  const initialHashState = parseHashState();
+  let isSharedOriginOverride = false;
+  if (initialHashState.fromSpec) {
+    const fs = initialHashState.fromSpec;
+    if (fs.mode === "gps") {
+      initial.homeMode = "gps";
+      initial.gpsOrigin = { lat: fs.lat, lng: fs.lng };
+    } else if (fs.mode === "sector" && DATA.SECTOR_MAP[fs.sectorId]) {
+      initial.homeMode = "sector";
+      initial.homeSectorId = fs.sectorId;
+      initial.homeSpotId = fs.spotId;
+      initial.homeSpotBySector = { ...initial.homeSpotBySector, [fs.sectorId]: fs.spotId };
+    }
+    isSharedOriginOverride = true;
+  }
+
+  const initialHashSectorId = initialHashState.sectorId;
   if (initialHashSectorId && DATA.SECTOR_MAP[initialHashSectorId]) {
     const sec = DATA.SECTOR_MAP[initialHashSectorId];
     initial.selectedSectorId = sec.id;
@@ -214,7 +350,7 @@
     homeSpotId: initial.homeSpotId,
     homeSpotBySector: initial.homeSpotBySector,
     gpsOrigin: initial.gpsOrigin,
-    poolMode: initial.poolMode, // 'all' | 'active' | 'hangout' | 'unexplored'
+    poolMode: initial.poolMode, // 'all' | 'active' | 'hangout' | 'unexplored' | 'nearby' | 'metro'
     rolledLetter: initial.rolledLetter,
     rolledNumber: initial.rolledNumber,
     selectedSectorId: initial.selectedSectorId,
@@ -231,12 +367,21 @@
   };
 
   function persistState() {
+    const homeToSave = isSharedOriginOverride
+      ? persistedHomeSnapshot
+      : {
+          homeMode: state.homeMode,
+          homeSectorId: state.homeSectorId,
+          homeSpotId: state.homeSpotId,
+          homeSpotBySector: state.homeSpotBySector,
+          gpsOrigin: state.gpsOrigin,
+        };
     saveJson(STORAGE_STATE, {
-      homeMode: state.homeMode,
-      homeSectorId: state.homeSectorId,
-      homeSpotId: state.homeSpotId,
-      homeSpotBySector: state.homeSpotBySector,
-      gpsOrigin: state.gpsOrigin,
+      homeMode: homeToSave.homeMode,
+      homeSectorId: homeToSave.homeSectorId,
+      homeSpotId: homeToSave.homeSpotId,
+      homeSpotBySector: homeToSave.homeSpotBySector,
+      gpsOrigin: homeToSave.gpsOrigin,
       poolMode: state.poolMode,
       rolledLetter: state.rolledLetter,
       rolledNumber: state.rolledNumber,
@@ -397,15 +542,7 @@
     };
   }
 
-  function haversineKm(lat1, lng1, lat2, lng2) {
-    const R = 6371;
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLng = ((lng2 - lng1) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
+  const haversineKm = DATA.haversineKm;
 
   function bearingCompass(lat1, lng1, lat2, lng2) {
     const y = Math.sin(((lng2 - lng1) * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180);
@@ -536,10 +673,16 @@
 
   // ==================== Pool Filtering ====================
   function getEligibleSectors() {
+    const origin = state.poolMode === "nearby" ? getCurrentOrigin() : null;
     return DATA.SECTORS.filter((s) => {
       if (state.poolMode === "active") return s.tier === "active" || s.tier === "developing";
       if (state.poolMode === "hangout") return s.hangoutScore >= 4;
       if (state.poolMode === "unexplored") return !state.explored.has(s.id);
+      if (state.poolMode === "nearby") {
+        if (!origin.isGps && origin.sector && s.id === origin.sector) return true;
+        return haversineKm(origin.lat, origin.lng, s.lat, s.lng) <= NEARBY_RADIUS_KM;
+      }
+      if (state.poolMode === "metro") return Boolean(s.metroServed);
       return true;
     });
   }
@@ -559,10 +702,13 @@
 
   // ==================== SVG Map Rendering ====================
   const sectorNodes = new Map();
+  const metroStopMap = new Map();
   let sectorsLayerEl = null;
+  let metroLayerEl = null;
   let landmarksLayerEl = null;
   let fxLayerEl = null;
   let hoveredSectorId = null;
+  let hoveredMetroStopId = null;
   let suppressClickUntil = 0;
   let gestureDragged = false;
 
@@ -845,7 +991,7 @@
       const nextG = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest(".sector-group") : null;
       if (!nextG) {
         hoveredSectorId = null;
-        hideTooltip();
+        if (!hoveredMetroStopId) hideTooltip();
       }
     });
 
@@ -856,12 +1002,123 @@
       selectSectorManually(g.dataset.id);
     });
 
-    // 5. Landmarks & Orange Line Metro Layer (created once, toggled cleanly)
-    landmarksLayerEl = svgEl("g", { id: "landmarks-layer", "pointer-events": "none" }, vp);
-    DATA.METRO_STOPS.forEach((stop) => {
-      const p = latLngToSvg(stop.lat, stop.lng);
-      svgEl("circle", { cx: p.x, cy: p.y, r: 2.5, fill: "#fb923c", stroke: "#070e15", "stroke-width": 0.9 }, landmarksLayerEl);
+    // 5. Interactive Orange & Red Line Metro Network Layer
+    metroStopMap.clear();
+    metroLayerEl = svgEl("g", { id: "metro-layer", class: "metro-layer" }, vp);
+
+    DATA.METRO_LINES.forEach((lineObj) => {
+      const pts = lineObj.stops.map((st) => {
+        const p = latLngToSvg(st.lat, st.lng);
+        return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+      });
+      svgEl("polyline", { class: "metro-line-casing", points: pts.join(" "), "pointer-events": "none" }, metroLayerEl);
+      svgEl("polyline", { class: `metro-line-path metro-line-${lineObj.id}`, points: pts.join(" "), "pointer-events": "none" }, metroLayerEl);
     });
+
+    // Subtle transit line labels
+    const orangeLblStop = DATA.METRO_LINES[0]?.stops[7]; // Golra Mor area
+    if (orangeLblStop) {
+      const p = latLngToSvg(orangeLblStop.lat, orangeLblStop.lng);
+      const t = svgEl(
+        "text",
+        {
+          x: p.x - 10,
+          y: p.y - 10,
+          fill: "rgba(253, 186, 116, 0.85)",
+          "font-size": "6.8",
+          "font-weight": "700",
+          "letter-spacing": "1.2",
+          "text-anchor": "middle",
+          transform: `rotate(-28 ${p.x - 10} ${p.y - 10})`,
+          "pointer-events": "none",
+          style: "text-shadow: 0 1px 3px #000;",
+        },
+        metroLayerEl
+      );
+      t.textContent = "ORANGE LINE";
+    }
+    const redLblStop = DATA.METRO_LINES[1]?.stops[2]; // Blue Area Jinnah Ave
+    if (redLblStop) {
+      const p = latLngToSvg(redLblStop.lat, redLblStop.lng);
+      const t = svgEl(
+        "text",
+        {
+          x: p.x + 8,
+          y: p.y - 8,
+          fill: "rgba(253, 164, 175, 0.88)",
+          "font-size": "6.8",
+          "font-weight": "700",
+          "letter-spacing": "1.2",
+          "text-anchor": "middle",
+          transform: `rotate(-28 ${p.x + 8} ${p.y - 8})`,
+          "pointer-events": "none",
+          style: "text-shadow: 0 1px 3px #000;",
+        },
+        metroLayerEl
+      );
+      t.textContent = "RED LINE";
+    }
+
+    DATA.METRO_STOPS.forEach((stop) => {
+      metroStopMap.set(stop.id, stop);
+      const p = latLngToSvg(stop.lat, stop.lng);
+      const g = svgEl("g", { class: "metro-stop-group", "data-stop-id": stop.id }, metroLayerEl);
+      svgEl("circle", { cx: p.x, cy: p.y, r: 8.5, fill: "transparent" }, g);
+      if (stop.interchange) {
+        svgEl("circle", { class: "metro-stop-dot", cx: p.x, cy: p.y, r: 5.2, fill: "#09111a", stroke: "#fb923c", "stroke-width": 1.6 }, g);
+        svgEl("circle", { cx: p.x, cy: p.y, r: 2.7, fill: "#f43f5e", stroke: "#fde68a", "stroke-width": 0.9, "pointer-events": "none" }, g);
+      } else {
+        const fillCol = stop.lines.includes("red") ? "#f43f5e" : "#fb923c";
+        svgEl("circle", { class: "metro-stop-dot", cx: p.x, cy: p.y, r: 3.1, fill: fillCol, stroke: "#070e15", "stroke-width": 1.0 }, g);
+      }
+    });
+
+    metroLayerEl.addEventListener("pointerover", (e) => {
+      if (e.pointerType === "touch" || gestureDragged) return;
+      const g = e.target.closest(".metro-stop-group");
+      if (!g) return;
+      const stopId = g.dataset.stopId;
+      if (stopId !== hoveredMetroStopId) {
+        hoveredMetroStopId = stopId;
+        hoveredSectorId = null;
+        const stop = metroStopMap.get(stopId);
+        if (stop) showMetroTooltip(stop, e);
+      }
+    });
+
+    metroLayerEl.addEventListener("pointermove", (e) => {
+      if (e.pointerType === "touch" || !hoveredMetroStopId || gestureDragged) return;
+      moveTooltip(e);
+    });
+
+    metroLayerEl.addEventListener("pointerout", (e) => {
+      if (e.pointerType === "touch") return;
+      const nextStop = e.relatedTarget && e.relatedTarget.closest ? e.relatedTarget.closest(".metro-stop-group") : null;
+      if (!nextStop) {
+        hoveredMetroStopId = null;
+        if (!hoveredSectorId) hideTooltip();
+      }
+    });
+
+    metroLayerEl.addEventListener("click", (e) => {
+      if (performance.now() < suppressClickUntil) return;
+      const g = e.target.closest(".metro-stop-group");
+      if (!g) return;
+      e.stopPropagation();
+      const stop = metroStopMap.get(g.dataset.stopId);
+      if (!stop || !Array.isArray(stop.serves) || !stop.serves.length) return;
+      // Cycle between served sectors across the highway on repeated clicks
+      const currIdx = stop.serves.indexOf(state.selectedSectorId);
+      const nextSecId = currIdx >= 0 ? stop.serves[(currIdx + 1) % stop.serves.length] : stop.serves[0];
+      if (DATA.SECTOR_MAP[nextSecId]) {
+        selectSectorManually(nextSecId);
+        const lineName = stop.interchange ? "Orange ↔ Red" : stop.lines.includes("red") ? "Red Line" : "Orange Line";
+        el.mapToast.textContent = `${lineName} · ${stop.name} → ${nextSecId}`;
+      }
+    });
+
+    // 6. Major Landmarks Layer (created once, toggled cleanly)
+    landmarksLayerEl = svgEl("g", { id: "landmarks-layer", "pointer-events": "none" }, vp);
     DATA.LANDMARKS.forEach((lm) => {
       const p = latLngToSvg(lm.lat, lm.lng);
       svgEl("circle", { cx: p.x, cy: p.y, r: 3.1, fill: "#38bdf8", stroke: "#070e15", "stroke-width": 1.1 }, landmarksLayerEl);
@@ -881,8 +1138,169 @@
       t.textContent = lm.name;
     });
 
-    // 6. Dynamic Home Radar + Active Route Trajectory Layer
+    // 7. Dynamic Home Radar + Active Route Trajectory Layer
     fxLayerEl = svgEl("g", { id: "fx-layer", "pointer-events": "none" }, vp);
+  }
+
+  const E_W_SPINES = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5];
+
+  function pickEastWestSpine(r0, r1, origin) {
+    const minR = Math.min(r0, r1);
+    const maxR = Math.max(r0, r1);
+
+    if (minR <= 4.5 && maxR >= 4.5 && Math.abs(r1 - r0) >= 0.65) {
+      return 4.5; // Srinagar Highway main E-W divider
+    }
+    if (!origin.isGps && origin.sector === "H-11" && r1 <= 4.5) {
+      return 4.5;
+    }
+    if (maxR <= 1.2) return 0.5;
+    if (minR >= 1.7 && maxR <= 2.4) return 2.5;
+    if (minR >= 1.7 && maxR <= 3.4 && minR < 2.5) return 2.5;
+    if (minR >= 2.6 && maxR <= 3.4) return 3.5;
+    if (minR >= 2.6 && maxR <= 4.4) return 3.5;
+    if (minR >= 3.6 && maxR <= 5.4 && maxR < 4.5) return 4.5;
+    if (minR >= 4.6 && maxR <= 5.4) return 4.5;
+    if (minR >= 4.6 && maxR <= 6.4 && minR < 5.5) return 5.5;
+    if (minR >= 5.6) return 6.5;
+
+    const mid = (r0 + r1) / 2;
+    return E_W_SPINES.reduce((best, r) => (Math.abs(r - mid) < Math.abs(best - mid) ? r : best), 4.5);
+  }
+
+  function cleanRouteSvgPoints(rawPts) {
+    const out = [];
+    rawPts.forEach((pt, idx) => {
+      const isLast = idx === rawPts.length - 1;
+      if (!out.length) {
+        out.push(pt);
+        return;
+      }
+      const prev = out[out.length - 1];
+      const dist = Math.hypot(pt.x - prev.x, pt.y - prev.y);
+      if (isLast) {
+        if (dist < 7.5 && out.length > 1) {
+          out[out.length - 1] = pt;
+        } else {
+          out.push(pt);
+        }
+      } else if (dist >= 7.5) {
+        out.push(pt);
+      }
+    });
+    return out;
+  }
+
+  function buildGridRouteSvgPoints(origin, target) {
+    const g0 = DATA.latLngToGrid(origin.lat, origin.lng);
+    const g1 = target.coords ? DATA.latLngToGrid(target.lat, target.lng) : { r: target.rowIdx, c: target.colIdx };
+
+    // Fallback to Bezier when GPS pin is completely outside Islamabad grid
+    if (origin.isGps && (g0.r < -1.5 || g0.r > 7.5 || g0.c < 3.5 || g0.c > 18)) {
+      return null;
+    }
+
+    // Off-grid Zone II (B-17) connects via Srinagar Hwy -> N-5 GT Road or Margalla Ave
+    const isTargetB17 = target.id === "B-17";
+    const isOriginB17 = !origin.isGps && origin.sector === "B-17";
+    if (isTargetB17 || isOriginB17) {
+      const otherGrid = isTargetB17 ? g0 : g1;
+      const latLngWaypoints = [];
+      if (otherGrid.r <= 1.2) {
+        latLngWaypoints.push(
+          DATA.gridToLatLng(0.5, otherGrid.c),
+          DATA.gridToLatLng(0.5, 15.8),
+          { lat: 33.694, lng: 72.835 }
+        );
+      } else {
+        const halfOrig = Math.floor(otherGrid.c) + 0.5;
+        const cAve = Math.abs(otherGrid.c - halfOrig) <= 0.18 ? halfOrig : Math.min(16.0, Math.round(otherGrid.c) + 0.5);
+        latLngWaypoints.push(
+          DATA.gridToLatLng(otherGrid.r, cAve),
+          DATA.gridToLatLng(4.5, cAve),
+          DATA.gridToLatLng(4.5, 16.5),
+          { lat: 33.628, lng: 72.885 },
+          { lat: 33.671, lng: 72.842 }
+        );
+      }
+      if (isOriginB17) latLngWaypoints.reverse();
+      const raw = [
+        latLngToSvg(origin.lat, origin.lng),
+        ...latLngWaypoints.map((ll) => latLngToSvg(ll.lat, ll.lng)),
+        latLngToSvg(target.lat, target.lng),
+      ];
+      return cleanRouteSvgPoints(raw);
+    }
+
+    const r0 = g0.r;
+    const c0 = g0.c;
+    const r1 = target.rowIdx;
+    const c1 = target.colIdx;
+    const rcPts = [];
+
+    if (Math.abs(c1 - c0) < 0.6) {
+      // Same column: drive straight north/south along dividing avenue
+      const nearestHalf = Math.floor(c0) + 0.5;
+      const cAve =
+        Math.abs(c0 - nearestHalf) <= 0.2
+          ? nearestHalf
+          : Math.round((c0 + c1) / 2) + (c0 < 10 ? 0.5 : -0.5);
+      rcPts.push([r0, cAve], [r1, cAve]);
+    } else if (Math.abs(r1 - r0) < 0.65) {
+      // Same row: single L-turn for adjacent sector, or E-W boulevard spine for multi-sector hop
+      if (Math.abs(c1 - c0) <= 1.15) {
+        rcPts.push([r1, c0]);
+      } else {
+        const rSpine = pickEastWestSpine(r0, r1, origin);
+        rcPts.push([rSpine, c0], [rSpine, c1]);
+      }
+    } else {
+      // Orthogonal avenue -> E-W highway spine -> target approach avenue
+      const rSpine = pickEastWestSpine(r0, r1, origin);
+      const nearestHalfOrig = Math.floor(c0) + 0.5;
+      const cOrigAve =
+        Math.abs(c0 - nearestHalfOrig) <= 0.18
+          ? nearestHalfOrig
+          : Math.round(c0) + (c1 >= c0 ? 0.5 : -0.5);
+      const cDestAve = c1 + (c0 > c1 ? 0.5 : -0.5);
+      rcPts.push([r0, cOrigAve], [rSpine, cOrigAve], [rSpine, cDestAve], [r1, cDestAve]);
+    }
+
+    const raw = [
+      latLngToSvg(origin.lat, origin.lng),
+      ...rcPts.map(([r, c]) => {
+        const ll = DATA.gridToLatLng(r, c);
+        return latLngToSvg(ll.lat, ll.lng);
+      }),
+      latLngToSvg(target.lat, target.lng),
+    ];
+    return cleanRouteSvgPoints(raw);
+  }
+
+  function polylineMidpoint(pts) {
+    if (!pts.length) return { x: 0, y: 0 };
+    if (pts.length === 1) return pts[0];
+    let total = 0;
+    const segs = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const len = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y);
+      segs.push(len);
+      total += len;
+    }
+    const targetDist = total / 2;
+    let acc = 0;
+    for (let i = 0; i < segs.length; i++) {
+      const segLen = segs[i];
+      if (acc + segLen >= targetDist && segLen > 0) {
+        const t = (targetDist - acc) / segLen;
+        return {
+          x: pts[i].x + (pts[i + 1].x - pts[i].x) * t,
+          y: pts[i].y + (pts[i + 1].y - pts[i].y) * t,
+        };
+      }
+      acc += segLen;
+    }
+    return pts[Math.floor(pts.length / 2)];
   }
 
   function renderFxLayer(origin) {
@@ -890,6 +1308,24 @@
     fxLayerEl.innerHTML = "";
 
     const originPt = latLngToSvg(origin.lat, origin.lng);
+
+    // 5 km Radius visualization when "Under 5 km" filter is active
+    if (state.poolMode === "nearby") {
+      const radiusSvg = (NEARBY_RADIUS_KM / 111.19) * PROJ.scale;
+      svgEl(
+        "circle",
+        { class: "radius-ring", cx: originPt.x.toFixed(1), cy: originPt.y.toFixed(1), r: radiusSvg.toFixed(1) },
+        fxLayerEl
+      );
+      const lblY = originPt.y - radiusSvg > 26 ? originPt.y - radiusSvg - 6 : originPt.y + radiusSvg + 12;
+      const radLbl = svgEl(
+        "text",
+        { class: "radius-ring-label", x: originPt.x.toFixed(1), y: lblY.toFixed(1) },
+        fxLayerEl
+      );
+      radLbl.textContent = `${NEARBY_RADIUS_KM} KM RADIUS`;
+    }
+
     svgEl("circle", { class: "home-ring", cx: originPt.x, cy: originPt.y, r: 10 }, fxLayerEl);
     svgEl("circle", { cx: originPt.x, cy: originPt.y, r: 4.5, fill: "#34d399", stroke: "#042f2e", "stroke-width": 1.6 }, fxLayerEl);
 
@@ -915,26 +1351,69 @@
     if (!target) return;
 
     const targetPt = latLngToSvg(target.lat, target.lng);
+
+    // Highlight nearest Metro station to selected sector
+    if (target.nearestMetro && (state.showLandmarks || state.poolMode === "metro")) {
+      const nm = target.nearestMetro;
+      const nmPt = latLngToSvg(nm.lat, nm.lng);
+      const nmColor = nm.lines && nm.lines.includes("red") && !nm.lines.includes("orange") ? "#f43f5e" : "#fb923c";
+      svgEl(
+        "circle",
+        { class: "metro-nearest-ring", cx: nmPt.x.toFixed(1), cy: nmPt.y.toFixed(1), r: 8.5, stroke: nmColor },
+        fxLayerEl
+      );
+      const nmLabel = svgEl(
+        "text",
+        {
+          class: "metro-nearest-label",
+          x: (nmPt.x + 9).toFixed(1),
+          y: (nmPt.y + 3).toFixed(1),
+        },
+        fxLayerEl
+      );
+      nmLabel.textContent = `M · ${nm.name}`;
+    }
+
     svgEl("circle", { class: "beacon-ring", cx: targetPt.x, cy: targetPt.y, r: 14 }, fxLayerEl);
 
     if (origin.isGps || target.id !== origin.sector) {
-      // Curved trajectory arc from current Home Base to target
-      const midX = (originPt.x + targetPt.x) / 2;
-      const midY = (originPt.y + targetPt.y) / 2;
-      const dx = targetPt.x - originPt.x;
-      const dy = targetPt.y - originPt.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const curveOffset = Math.min(48, len * 0.16);
-      const ctrlX = midX - (dy / len) * curveOffset;
-      const ctrlY = midY + (dx / len) * curveOffset;
-      const pathD = `M ${originPt.x.toFixed(1)} ${originPt.y.toFixed(1)} Q ${ctrlX.toFixed(1)} ${ctrlY.toFixed(1)} ${targetPt.x.toFixed(1)} ${targetPt.y.toFixed(1)}`;
+      const gridPts = buildGridRouteSvgPoints(origin, target);
+      let pathD = "";
+      let badgePos = null;
 
-      svgEl("path", { class: "route-line-bg", d: pathD }, fxLayerEl);
-      svgEl("path", { class: "route-line-flow", d: pathD }, fxLayerEl);
+      if (gridPts && gridPts.length >= 2) {
+        pathD = gridPts.map((pt, i) => `${i === 0 ? "M" : "L"} ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`).join(" ");
+        svgEl("path", { class: "route-line-bg", d: pathD }, fxLayerEl);
+        svgEl("path", { class: "route-line-flow", d: pathD }, fxLayerEl);
 
-      // Midpoint distance badge along the curve (at t=0.5 of quadratic bezier)
-      const labelX = 0.25 * originPt.x + 0.5 * ctrlX + 0.25 * targetPt.x;
-      const labelY = 0.25 * originPt.y + 0.5 * ctrlY + 0.25 * targetPt.y;
+        // Turn junction nodes at avenue intersections
+        for (let i = 1; i < gridPts.length - 1; i++) {
+          svgEl(
+            "circle",
+            { class: "route-junction-dot", cx: gridPts[i].x.toFixed(1), cy: gridPts[i].y.toFixed(1), r: 2.6 },
+            fxLayerEl
+          );
+        }
+        badgePos = polylineMidpoint(gridPts);
+      } else {
+        // Off-grid external GPS fallback arc
+        const midX = (originPt.x + targetPt.x) / 2;
+        const midY = (originPt.y + targetPt.y) / 2;
+        const dx = targetPt.x - originPt.x;
+        const dy = targetPt.y - originPt.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const curveOffset = Math.min(48, len * 0.16);
+        const ctrlX = midX - (dy / len) * curveOffset;
+        const ctrlY = midY + (dx / len) * curveOffset;
+        pathD = `M ${originPt.x.toFixed(1)} ${originPt.y.toFixed(1)} Q ${ctrlX.toFixed(1)} ${ctrlY.toFixed(1)} ${targetPt.x.toFixed(1)} ${targetPt.y.toFixed(1)}`;
+        svgEl("path", { class: "route-line-bg", d: pathD }, fxLayerEl);
+        svgEl("path", { class: "route-line-flow", d: pathD }, fxLayerEl);
+        badgePos = {
+          x: 0.25 * originPt.x + 0.5 * ctrlX + 0.25 * targetPt.x,
+          y: 0.25 * originPt.y + 0.5 * ctrlY + 0.25 * targetPt.y,
+        };
+      }
+
       const info = computeTravelInfo(target);
       const pillText = `${info.straightKm.toFixed(1)} km · ~${info.roadKm.toFixed(0)} km drive`;
       const pillW = pillText.length * 6.4 + 18;
@@ -942,8 +1421,8 @@
       svgEl(
         "rect",
         {
-          x: labelX - pillW / 2,
-          y: labelY - 11,
+          x: badgePos.x - pillW / 2,
+          y: badgePos.y - 11,
           width: pillW,
           height: 21,
           rx: 10.5,
@@ -956,8 +1435,8 @@
       const badgeTxt = svgEl(
         "text",
         {
-          x: labelX,
-          y: labelY + 0.5,
+          x: badgePos.x,
+          y: badgePos.y + 0.5,
           fill: "#fde68a",
           "font-family": "var(--font-mono)",
           "font-size": "9.5",
@@ -1004,6 +1483,12 @@
       }
     });
 
+    if (metroLayerEl) {
+      const showMetro = state.showLandmarks || state.poolMode === "metro";
+      metroLayerEl.style.display = showMetro ? "" : "none";
+      metroLayerEl.classList.toggle("emphasized", state.poolMode === "metro");
+    }
+
     if (landmarksLayerEl) {
       landmarksLayerEl.style.display = state.showLandmarks ? "" : "none";
     }
@@ -1012,6 +1497,26 @@
   }
 
   // ==================== Map Tooltip ====================
+  function showMetroTooltip(stop, evt) {
+    const origin = getCurrentOrigin();
+    const dist = haversineKm(origin.lat, origin.lng, stop.lat, stop.lng).toFixed(1);
+    const lineText = stop.interchange
+      ? "ORANGE ↔ RED"
+      : stop.lines.includes("red")
+      ? "RED LINE"
+      : "ORANGE LINE";
+    el.tooltip.innerHTML = `
+      <div class="tt-head">
+        <span class="tt-code">${lineText}</span>
+        <span class="tt-dist">${dist} km</span>
+      </div>
+      <div class="tt-title">${stop.name}</div>
+      <div class="tt-status">Serves: ${stop.serves.join(", ")} · Click to inspect</div>
+    `;
+    el.tooltip.classList.add("visible");
+    moveTooltip(evt);
+  }
+
   function showTooltip(sec, evt) {
     const origin = getCurrentOrigin();
     const isHome = !origin.isGps && sec.id === origin.sector;
@@ -1036,6 +1541,7 @@
 
   function hideTooltip() {
     hoveredSectorId = null;
+    hoveredMetroStopId = null;
     el.tooltip.classList.remove("visible");
   }
 
@@ -1119,21 +1625,22 @@
 
     el.letterPoolChips.innerHTML = "";
     if (!letters.length) {
+      const origin = getCurrentOrigin();
       const msg = document.createElement("span");
       msg.className = `pool-empty-msg${allDoneUnexplored ? " complete" : ""}`;
       msg.textContent = allDoneUnexplored
         ? `All ${DATA.SECTORS.length} sectors explored!`
+        : state.poolMode === "nearby"
+        ? `No sectors within ${NEARBY_RADIUS_KM} km of ${origin.shortLabel}`
         : "No sectors match this filter";
       el.letterPoolChips.appendChild(msg);
 
-      if (allDoneUnexplored) {
-        const showAllBtn = document.createElement("button");
-        showAllBtn.type = "button";
-        showAllBtn.className = "pool-chip action-chip";
-        showAllBtn.textContent = "Show All (71)";
-        showAllBtn.addEventListener("click", () => setPoolMode("all"));
-        el.letterPoolChips.appendChild(showAllBtn);
-      }
+      const showAllBtn = document.createElement("button");
+      showAllBtn.type = "button";
+      showAllBtn.className = "pool-chip action-chip";
+      showAllBtn.textContent = "Show All (71)";
+      showAllBtn.addEventListener("click", () => setPoolMode("all"));
+      el.letterPoolChips.appendChild(showAllBtn);
     } else {
       letters.forEach((L) => {
         const btn = document.createElement("button");
@@ -1505,6 +2012,57 @@
     const isThisHome = origin.sector === sec.id && !origin.isGps;
     const neighbors = getAdjacentSectors(sec);
 
+    // Metro transit card HTML for target sector
+    const nm = sec.nearestMetro;
+    let metroBriefHtml = "";
+    if (nm) {
+      const badgeLines = sec.metroServed && sec.metroLines.length ? sec.metroLines : nm.lines || ["orange"];
+      const tagsHtml = badgeLines
+        .map((ln) => `<span class="metro-tag ${ln}">${ln === "red" ? "Red Line" : "Orange Line"}</span>`)
+        .join("");
+      const accessNote = sec.metroServed
+        ? `~${nm.distKm.toFixed(1)} km from center · Metro-accessible`
+        : `~${nm.distKm.toFixed(1)} km from sector (short ride from stop)`;
+
+      let transferHtml = "";
+      if (!isThisHome && typeof DATA.findNearestMetro === "function") {
+        const origMetro = DATA.findNearestMetro(origin.lat, origin.lng);
+        if (origMetro && sec.metroServed) {
+          if (origMetro.distKm <= 2.3) {
+            const origHasOrange = origMetro.lines.includes("orange");
+            const origHasRed = origMetro.lines.includes("red");
+            const destHasOrange = nm.lines.includes("orange");
+            const destHasRed = nm.lines.includes("red");
+
+            if (origMetro.id === nm.id) {
+              transferHtml = `Share <strong>${nm.name}</strong> stop (~${origMetro.distKm.toFixed(1)} km from ${origin.shortLabel}).`;
+            } else if (origHasOrange && destHasOrange) {
+              transferHtml = `Board <strong>Orange Line</strong> at <strong>${origMetro.name}</strong> (${origMetro.distKm.toFixed(1)} km from ${origin.shortLabel}) → alight <strong>${nm.name}</strong>.`;
+            } else if (origHasRed && destHasRed) {
+              transferHtml = `Board <strong>Red Line</strong> at <strong>${origMetro.name}</strong> (${origMetro.distKm.toFixed(1)} km from ${origin.shortLabel}) → alight <strong>${nm.name}</strong>.`;
+            } else {
+              const firstLine = origHasOrange ? "Orange Line" : "Red Line";
+              const nextLine = destHasRed ? "Red Line" : "Orange Line";
+              transferHtml = `Board <strong>${firstLine}</strong> at <strong>${origMetro.name}</strong> → swap at <strong>Faiz Ahmed Faiz (Peshawar Morr)</strong> → <strong>${nextLine}</strong> to <strong>${nm.name}</strong>.`;
+            }
+          } else {
+            transferHtml = `Closest stop to ${origin.shortLabel}: <strong>${origMetro.name}</strong> (${origMetro.distKm.toFixed(1)} km away).`;
+          }
+        }
+      }
+
+      metroBriefHtml = `
+        <div class="metro-brief">
+          <div class="metro-brief-head">
+            ${tagsHtml}
+            <span class="metro-station-name">Nearest Metro: ${nm.name}</span>
+            <span class="metro-dist-pill">(${accessNote})</span>
+          </div>
+          ${transferHtml ? `<div class="metro-brief-transfer">${transferHtml}</div>` : ""}
+        </div>
+      `;
+    }
+
     const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${sec.lat},${sec.lng}`;
     const gdirUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${sec.lat},${sec.lng}`;
 
@@ -1551,6 +2109,7 @@
         <div class="route-brief">
           <strong>From ${origin.label}:</strong> ${info.routeText}
         </div>
+        ${metroBriefHtml}
       </div>
 
       <div class="guide-section">
@@ -1591,11 +2150,60 @@
           }
         </div>
         <div class="external-links">
+          <button id="copy-trip-link-btn" class="ext-link copy-link-btn" type="button" title="Copy shareable route link for WhatsApp or Discord">Copy Trip Link</button>
           <a class="ext-link" href="${gmapsUrl}" target="_blank" rel="noopener">Map ↗</a>
           <a class="ext-link" href="${gdirUrl}" target="_blank" rel="noopener">Directions ↗</a>
         </div>
       </div>
     `;
+
+    const copyBtn = document.getElementById("copy-trip-link-btn");
+    if (copyBtn) {
+      let copyResetTimer = null;
+      copyBtn.addEventListener("click", async () => {
+        syncUrlHash(sec.id);
+        const shareUrl = buildShareUrl(sec.id, origin);
+        let copied = false;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          try {
+            await navigator.clipboard.writeText(shareUrl);
+            copied = true;
+          } catch {
+            copied = false;
+          }
+        }
+        if (!copied) {
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = shareUrl;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            copied = document.execCommand("copy");
+            document.body.removeChild(ta);
+          } catch {
+            copied = false;
+          }
+        }
+
+        if (copyResetTimer) clearTimeout(copyResetTimer);
+        if (copied) {
+          copyBtn.textContent = "✓ Copied Link!";
+          copyBtn.classList.add("copied");
+          el.mapToast.textContent = `Copied trip link: ${origin.shortLabel} → ${sec.id}`;
+          playTick(660, 0.06, 0.06);
+        } else {
+          copyBtn.textContent = "Hash Ready in URL";
+          el.mapToast.textContent = `Share URL: ${buildUrlHash(sec.id, origin)}`;
+        }
+        copyResetTimer = setTimeout(() => {
+          copyBtn.textContent = "Copy Trip Link";
+          copyBtn.classList.remove("copied");
+        }, 2200);
+      });
+    }
 
     const scrollToMapBtn = document.getElementById("scroll-to-map-btn");
     if (scrollToMapBtn) {
@@ -1839,10 +2447,23 @@
   }
 
   function commitOriginChange() {
+    isSharedOriginOverride = false;
+    persistedHomeSnapshot.homeMode = state.homeMode;
+    persistedHomeSnapshot.homeSectorId = state.homeSectorId;
+    persistedHomeSnapshot.homeSpotId = state.homeSpotId;
+    persistedHomeSnapshot.homeSpotBySector = { ...state.homeSpotBySector };
+    persistedHomeSnapshot.gpsOrigin = state.gpsOrigin ? { ...state.gpsOrigin } : null;
     populateHomeSectorSelect();
     populateHomeSpotSelect();
     syncOriginUI();
+    if (state.poolMode === "nearby" && state.rolledLetter && !getEligibleLetters().includes(state.rolledLetter)) {
+      state.rolledLetter = null;
+      state.rolledNumber = null;
+      state.selectedSectorId = null;
+    }
+    syncUrlHash(state.selectedSectorId);
     persistState();
+    renderDiceUI();
     updateMapState();
     renderFieldGuide(state.selectedSectorId ? DATA.SECTOR_MAP[state.selectedSectorId] : null);
     if (el.atlasBackdrop.classList.contains("open")) {
@@ -2242,13 +2863,43 @@
 
     window.addEventListener("hashchange", () => {
       if (state.isRolling) return;
-      const hashSecId = parseHashSectorId();
-      if (hashSecId) {
-        if (hashSecId !== state.selectedSectorId) {
-          finalizeSector(hashSecId, false);
+      const parsed = parseHashState(window.location.hash, "");
+      let originChanged = false;
+      if (parsed.fromSpec) {
+        const fs = parsed.fromSpec;
+        if (fs.mode === "gps") {
+          state.homeMode = "gps";
+          state.gpsOrigin = { lat: fs.lat, lng: fs.lng };
+          originChanged = true;
+        } else if (fs.mode === "sector" && DATA.SECTOR_MAP[fs.sectorId]) {
+          state.homeMode = "sector";
+          state.homeSectorId = fs.sectorId;
+          state.homeSpotId = fs.spotId;
+          state.homeSpotBySector = { ...state.homeSpotBySector, [fs.sectorId]: fs.spotId };
+          originChanged = true;
+        }
+        if (originChanged) {
+          isSharedOriginOverride = true;
+          populateHomeSectorSelect();
+          populateHomeSpotSelect();
+          syncOriginUI();
+          updateMapState();
+        }
+      }
+
+      if (parsed.sectorId) {
+        if (parsed.sectorId !== state.selectedSectorId) {
+          finalizeSector(parsed.sectorId, false);
+        } else if (originChanged) {
+          renderDiceUI();
+          renderFieldGuide(DATA.SECTOR_MAP[parsed.sectorId]);
+          if (state.focusRoute) focusOnRoute(parsed.sectorId);
         }
       } else if (state.selectedSectorId) {
         resetDice();
+      } else if (originChanged) {
+        renderDiceUI();
+        renderFieldGuide(null);
       }
     });
 
@@ -2268,7 +2919,9 @@
     if (initialSec) {
       const origin = getCurrentOrigin();
       el.mapToast.textContent =
-        !origin.isGps && initialSec.id === origin.sector
+        initialHashState.fromSpec
+          ? `Opened shared trip: ${origin.shortLabel} → ${initialSec.id}`
+          : !origin.isGps && initialSec.id === origin.sector
           ? `${initialSec.id} · Home Base (${origin.shortLabel})`
           : initialHashSectorId
           ? `Opened shared link ${initialSec.id} · Measuring from ${origin.shortLabel}`

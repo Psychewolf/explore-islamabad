@@ -39,6 +39,16 @@ window.ISLAMABAD_DATA = (() => {
     };
   }
 
+  function haversineKm(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
   // Polygon corners of a sector in (r, c) space (slightly inset by 0.065 to show avenue/greenbelt gaps)
   function sectorPolygonLatLng(letter, num, customCenter) {
     const r = ROW_INDEX[letter];
@@ -1486,18 +1496,104 @@ window.ISLAMABAD_DATA = (() => {
     },
   ];
 
-  // Orange Line Metrobus stops along Srinagar Highway (relevant for H-11 departures!)
-  const METRO_STOPS = [
-    { name: "Faiz Ahmed Faiz (Peshawar Morr)", lat: 33.6788, lng: 73.0448 },
-    { name: "NHA Station", lat: 33.6730, lng: 73.0332 },
-    { name: "G-10 / IIUI", lat: 33.6682, lng: 73.0218 },
-    { name: "Police Foundation", lat: 33.6648, lng: 73.0124 },
-    { name: "H-11 / G-11", lat: 33.6626, lng: 73.0022 },
-    { name: "NUST / G-12 (East)", lat: 33.6572, lng: 72.9905 },
-    { name: "NUST / G-12 (West)", lat: 33.6520, lng: 72.9788 },
-    { name: "Golra Mor / G-13", lat: 33.6462, lng: 72.9635 },
-    { name: "J&K / G-15", lat: 33.6335, lng: 72.9282 },
+  // Metrobus Network: Orange Line (Srinagar Hwy) + Red Line (Pak Secretariat -> Peshawar Morr -> Faizabad)
+  const INTERCHANGE_FAF = {
+    id: "faf-interchange",
+    name: "Faiz Ahmed Faiz (Peshawar Morr)",
+    lat: 33.6788,
+    lng: 73.0448,
+    interchange: true,
+    serves: ["H-9", "G-9", "H-8", "G-8"],
+  };
+
+  const ORANGE_LINE_STOPS = [
+    { ...INTERCHANGE_FAF, line: "orange", lines: ["orange", "red"] },
+    { id: "nha", name: "NHA Station", lat: 33.6730, lng: 73.0332, line: "orange", lines: ["orange"], serves: ["G-9", "H-9"] },
+    { id: "g10-iiui", name: "G-10 / IIUI", lat: 33.6682, lng: 73.0218, line: "orange", lines: ["orange"], serves: ["G-10", "H-10"] },
+    { id: "police-foundation", name: "Police Foundation", lat: 33.6648, lng: 73.0124, line: "orange", lines: ["orange"], serves: ["G-10", "H-10", "H-11"] },
+    { id: "h11-g11", name: "H-11 / G-11", lat: 33.6626, lng: 73.0022, line: "orange", lines: ["orange"], serves: ["H-11", "G-11"] },
+    { id: "nust-east", name: "NUST / G-12 (East)", lat: 33.6572, lng: 72.9905, line: "orange", lines: ["orange"], serves: ["H-12", "G-12"] },
+    { id: "nust-west", name: "NUST / G-12 (West)", lat: 33.6520, lng: 72.9788, line: "orange", lines: ["orange"], serves: ["H-12", "G-12", "H-13"] },
+    { id: "golra-mor", name: "Golra Mor / G-13", lat: 33.6462, lng: 72.9635, line: "orange", lines: ["orange"], serves: ["G-13", "H-13"] },
+    { id: "jk-g15", name: "J&K / G-15", lat: 33.6335, lng: 72.9282, line: "orange", lines: ["orange"], serves: ["G-15"] },
+    { id: "badhana-g16", name: "Badhana Kalan / G-16 (N-5)", lat: 33.6210, lng: 72.9115, line: "orange", lines: ["orange"], serves: ["G-16"] },
   ];
+
+  const RED_LINE_STOPS = [
+    { id: "pak-secretariat", name: "Pak Secretariat", ...gridToLatLng(3.52, 5.15), line: "red", lines: ["red"], serves: ["F-5", "G-5"] },
+    { id: "parade-ground", name: "Parade Ground", ...gridToLatLng(3.50, 5.75), line: "red", lines: ["red"], serves: ["F-6", "G-6"] },
+    { id: "shaheed-e-millat", name: "Shaheed-e-Millat", ...gridToLatLng(3.50, 6.22), line: "red", lines: ["red"], serves: ["F-6", "G-6"] },
+    { id: "7th-avenue", name: "7th Avenue", ...gridToLatLng(3.50, 6.60), line: "red", lines: ["red"], serves: ["F-6", "G-6", "F-7", "G-7"] },
+    { id: "stock-exchange", name: "Stock Exchange (Blue Area)", ...gridToLatLng(3.50, 7.12), line: "red", lines: ["red"], serves: ["F-7", "G-7"] },
+    { id: "pims", name: "PIMS Station (Centaurus / G-8)", ...gridToLatLng(3.62, 7.65), line: "red", lines: ["red"], serves: ["G-8", "F-8"] },
+    { id: "kachehry", name: "Kachehry", ...gridToLatLng(3.82, 8.28), line: "red", lines: ["red"], serves: ["G-8", "F-8"] },
+    { id: "ibn-e-sina", name: "Ibn-e-Sina", ...gridToLatLng(4.12, 8.50), line: "red", lines: ["red"], serves: ["G-8", "G-9"] },
+    { id: "chaman", name: "Chaman", ...gridToLatLng(4.36, 8.50), line: "red", lines: ["red"], serves: ["G-9", "G-8"] },
+    { id: "kashmir-hwy", name: "Kashmir Highway (Peshawar Morr N)", ...gridToLatLng(4.55, 8.55), line: "red", lines: ["red"], serves: ["G-9", "G-8", "H-9", "H-8"] },
+    { ...INTERCHANGE_FAF, line: "red", lines: ["orange", "red"] },
+    { id: "khayaban-e-johar", name: "Khayaban-e-Johar", ...gridToLatLng(5.28, 8.50), line: "red", lines: ["red"], serves: ["H-8", "H-9"] },
+    { id: "potohar", name: "Potohar", ...gridToLatLng(5.88, 8.50), line: "red", lines: ["red"], serves: ["I-8", "I-9"] },
+    { id: "ijp-road", name: "IJP Road", ...gridToLatLng(6.48, 8.42), line: "red", lines: ["red"], serves: ["I-8", "I-9"] },
+    { id: "faizabad", name: "Faizabad (Expressway Interchange)", lat: 33.6632, lng: 73.0842, line: "red", lines: ["red"], serves: ["I-8"] },
+  ];
+
+  const METRO_LINES = [
+    {
+      id: "orange",
+      name: "Orange Line Metrobus",
+      shortName: "Orange Line",
+      color: "#fb923c",
+      corridorLabel: "Peshawar Morr ↔ G-16 / Airport Link",
+      stops: ORANGE_LINE_STOPS,
+    },
+    {
+      id: "red",
+      name: "Red Line Metrobus",
+      shortName: "Red Line",
+      color: "#f43f5e",
+      corridorLabel: "Pak Secretariat ↔ Peshawar Morr ↔ Faizabad",
+      stops: RED_LINE_STOPS,
+    },
+  ];
+
+  // Deduplicated station list (merges interchange stations once)
+  const metroStopById = {};
+  const METRO_STOPS = [];
+  METRO_LINES.forEach((lineObj) => {
+    lineObj.stops.forEach((st) => {
+      if (!metroStopById[st.id]) {
+        const clone = { ...st, lines: [...st.lines], serves: [...st.serves] };
+        metroStopById[st.id] = clone;
+        METRO_STOPS.push(clone);
+      }
+    });
+  });
+
+  function findNearestMetro(lat, lng) {
+    let bestStop = METRO_STOPS[0];
+    let bestDist = Infinity;
+    for (const stop of METRO_STOPS) {
+      const d = haversineKm(lat, lng, stop.lat, stop.lng);
+      if (d < bestDist) {
+        bestDist = d;
+        bestStop = stop;
+      }
+    }
+    return {
+      ...bestStop,
+      distKm: +bestDist.toFixed(2),
+    };
+  }
+
+  // Enrich every sector with Metro Line accessibility & nearest Metro station telemetry
+  SECTORS.forEach((sec) => {
+    const servingStops = METRO_STOPS.filter((st) => Array.isArray(st.serves) && st.serves.includes(sec.id));
+    const linesSet = new Set();
+    servingStops.forEach((st) => st.lines.forEach((ln) => linesSet.add(ln)));
+    sec.metroServed = servingStops.length > 0;
+    sec.metroLines = Array.from(linesSet);
+    sec.nearestMetro = findNearestMetro(sec.lat, sec.lng);
+  });
 
   // Margalla Hills topographic ridge polygons (stylized real-world foothill band)
   const MARGALLA_RIDGES = [
@@ -1994,10 +2090,13 @@ window.ISLAMABAD_DATA = (() => {
     SECTOR_MAP: sectorMap,
     LANDMARKS,
     CORRIDORS,
+    METRO_LINES,
     METRO_STOPS,
     MARGALLA_RIDGES,
     RAWAL_LAKE,
     SHAKARPARIAN,
+    haversineKm,
+    findNearestMetro,
     gridToLatLng,
     latLngToGrid,
     getSubLocationsForSector,
