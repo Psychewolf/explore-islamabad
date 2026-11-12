@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Islamabad Sector Dice · Explorer from H-11/4 (FAST)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -26,7 +29,7 @@
             Islamabad Sector Dice
             <span class="brand-badge">71 SECTORS · B–I</span>
           </h1>
-          <p class="brand-sub">Roll Letter → Number, light up the Doxiadis grid, measure from <span id="brand-sub-origin">H-11/4 (FAST)</span> &amp; discover what awaits</p>
+          <p class="brand-sub">Roll Letter to Number, highlight the Doxiadis grid, measure from <span id="brand-sub-origin">H-11/4 (FAST)</span></p>
         </div>
       </div>
 
@@ -34,7 +37,9 @@
         <span class="origin-dot"></span>
         <span class="origin-prefix">Home:</span>
         <select id="home-sector-select" class="origin-select origin-sector-select" aria-label="Choose your Home Base sector (all 71 Islamabad sectors)"></select>
-        <span class="origin-sep" aria-hidden="true">›</span>
+        <span class="origin-sep" aria-hidden="true">
+          <svg class="ui-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+        </span>
         <select id="home-spot-select" class="origin-select origin-spot-select" aria-label="Choose precisely where inside the chosen sector"></select>
         <button id="use-gps-btn" class="origin-gps-btn" type="button" title="Use browser GPS as Home Base">GPS</button>
       </div>
@@ -87,8 +92,12 @@
             <div class="map-zoom-controls">
               <button id="toggle-landmarks-btn" class="map-icon-btn active" type="button" title="Toggle major landmarks &amp; Metro stations">Landmarks</button>
               <button id="focus-route-btn" class="map-icon-btn" type="button" title="Focus view on Home Base and selected sector">Focus Route</button>
-              <button id="zoom-in-btn" class="map-icon-btn" type="button" title="Zoom in">+</button>
-              <button id="zoom-out-btn" class="map-icon-btn" type="button" title="Zoom out">−</button>
+              <button id="zoom-in-btn" class="map-icon-btn" type="button" title="Zoom in" aria-label="Zoom in">
+                <svg class="ui-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
+              <button id="zoom-out-btn" class="map-icon-btn" type="button" title="Zoom out" aria-label="Zoom out">
+                <svg class="ui-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              </button>
               <button id="reset-view-btn" class="map-icon-btn" type="button" title="Reset full Islamabad view">Fit City</button>
             </div>
           </div>
@@ -131,9 +140,10 @@
           </div>
           <div class="map-bottom-bar">
             <button id="toggle-legend-btn" class="legend-toggle-btn" type="button" aria-expanded="false" aria-controls="map-legend">
-              Legend ▾
+              <span>Legend</span>
+              <svg class="ui-icon legend-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
             </button>
-            <div id="map-status-toast" class="map-status-toast">Click any sector or roll the dice →</div>
+            <div id="map-status-toast" class="map-status-toast">Select any sector or roll the dice.</div>
           </div>
         </div>
       </section>
@@ -219,9 +229,12 @@
     <div class="atlas-modal">
       <div class="atlas-header">
         <div>
-          <h2 id="atlas-title">Complete Islamabad Sector Atlas (All 71 Researched Sectors)</h2>
+          <h2 id="atlas-title">Sector Index (71)</h2>
         </div>
-        <button id="close-atlas-btn" class="secondary-btn" type="button">Close ✕</button>
+        <button id="close-atlas-btn" class="secondary-btn icon-btn" type="button">
+          <span>Close</span>
+          <svg class="ui-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
       </div>
       <div class="atlas-toolbar">
         <input id="atlas-search" class="atlas-input" type="text" placeholder="Search by sector, landmark, cafe, university, bazaar..." />

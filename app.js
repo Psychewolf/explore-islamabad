@@ -449,7 +449,7 @@
     fieldGuide: document.getElementById("field-guide"),
   };
 
-  // ==================== Web Audio Dice FX ====================
+  // Web Audio Dice FX
   let audioCtx = null;
   function playTick(freq = 320, duration = 0.035, vol = 0.06, type = "triangle") {
     if (!state.soundEnabled) return;
@@ -480,7 +480,7 @@
     setTimeout(() => playTick(783.99, 0.22, 0.09, "sine"), 175);
   }
 
-  // ==================== Distance & Route Calculations ====================
+  // Distance & Route Calculations
   function findNearestSector(lat, lng) {
     let best = DATA.SECTORS[0];
     let bestDist = Infinity;
@@ -678,7 +678,7 @@
     };
   }
 
-  // ==================== Pool Filtering ====================
+  // Pool Filtering
   function getEligibleSectors() {
     return DATA.SECTORS.filter((s) => {
       if (state.poolMode === "active") return s.tier === "active" || s.tier === "developing";
@@ -701,7 +701,7 @@
       .sort((a, b) => a - b);
   }
 
-  // ==================== SVG Map Rendering ====================
+  // SVG Map Rendering
   const sectorNodes = new Map();
   let sectorsLayerEl = null;
   let landmarksLayerEl = null;
@@ -717,6 +717,20 @@
     }
     if (parent) parent.appendChild(node);
     return node;
+  }
+
+  const UI_ICONS = {
+    home: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline>',
+    check: '<polyline points="20 6 9 17 4 12"></polyline>',
+    circle: '<circle cx="12" cy="12" r="9"></circle>',
+    "arrow-up": '<line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline>',
+    "external-link": '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line>',
+    link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>',
+  };
+
+  function iconSvg(name) {
+    const body = UI_ICONS[name] || "";
+    return `<svg class="ui-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
   }
 
   function polyPointsStr(latLngList) {
@@ -1322,7 +1336,7 @@
         sublabel.textContent = "HOME";
         sublabel.style.fill = "#6ee7b7";
       } else if (isExplored) {
-        sublabel.textContent = "✓";
+        sublabel.textContent = "VISITED";
         sublabel.style.fill = "#34d399";
       } else if (sublabel.textContent) {
         sublabel.textContent = "";
@@ -1336,7 +1350,7 @@
     renderFxLayer(origin);
   }
 
-  // ==================== Map Tooltip ====================
+  // Map Tooltip
   function showTooltip(sec, evt) {
     const origin = getCurrentOrigin();
     const isHome = !origin.isGps && sec.id === origin.sector;
@@ -1364,7 +1378,7 @@
     el.tooltip.classList.remove("visible");
   }
 
-  // ==================== Map Pan & Zoom ====================
+  // Map Pan & Zoom
   function getSvgMetrics() {
     const rect = el.svg.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
@@ -1436,7 +1450,7 @@
     persistState();
   }
 
-  // ==================== Dice Rolling Engine ====================
+  // Dice Rolling Engine
   function renderDiceUI() {
     const letters = getEligibleLetters();
     const allDoneUnexplored =
@@ -1447,7 +1461,7 @@
       const msg = document.createElement("span");
       msg.className = `pool-empty-msg${allDoneUnexplored ? " complete" : ""}`;
       msg.textContent = allDoneUnexplored
-        ? `All ${DATA.SECTORS.length} sectors explored!`
+        ? `All ${DATA.SECTORS.length} sectors explored`
         : "No sectors match this filter";
       el.letterPoolChips.appendChild(msg);
 
@@ -1521,7 +1535,7 @@
     el.numberDieCol.classList.toggle("locked-step", state.rolledNumber !== null);
 
     if (allDoneUnexplored && !state.selectedSectorId) {
-      el.stepPill.textContent = `All ${DATA.SECTORS.length} Explored!`;
+      el.stepPill.textContent = `All ${DATA.SECTORS.length} Explored`;
       el.stepPill.classList.add("lit");
     } else if (state.selectedSectorId) {
       el.stepPill.textContent = `Selected: ${state.selectedSectorId}`;
@@ -1530,7 +1544,7 @@
       el.stepPill.textContent = `Row ${state.rolledLetter} Empty · Roll Letter`;
       el.stepPill.classList.add("lit");
     } else if (state.rolledLetter) {
-      el.stepPill.textContent = `Row ${state.rolledLetter} Lit · Step 2: Roll Number`;
+      el.stepPill.textContent = `Row ${state.rolledLetter} Active · Step 2: Roll Number`;
       el.stepPill.classList.add("lit");
     } else {
       el.stepPill.textContent = "Step 1: Roll Letter";
@@ -1566,7 +1580,7 @@
     updateMapState();
     renderFieldGuide(null);
     persistState();
-    el.mapToast.textContent = `Row ${letter} illuminated! Now roll the Number die.`;
+    el.mapToast.textContent = `Row ${letter} active · Roll the Number die`;
   }
 
   function rollLetterDie() {
@@ -1575,7 +1589,7 @@
     if (!pool.length) {
       el.mapToast.textContent =
         state.poolMode === "unexplored"
-          ? `All ${DATA.SECTORS.length} sectors explored! Switch filter to All (71) to keep rolling.`
+          ? `All ${DATA.SECTORS.length} sectors explored · Switch filter to All (71) to keep rolling`
           : "No eligible letters in the active filter.";
       renderDiceUI();
       return Promise.resolve(null);
@@ -1704,8 +1718,8 @@
     const origin = getCurrentOrigin();
     el.mapToast.textContent =
       !origin.isGps && sec.id === origin.sector
-        ? `${sec.id} · Home Base Selected (${origin.shortLabel})`
-        : `${sec.id} lit up! ${info.straightKm.toFixed(1)} km ${info.bearing.dir} (~${info.roadKm.toFixed(0)} km drive from ${origin.shortLabel})`;
+        ? `${sec.id} · Home Base (${origin.shortLabel})`
+        : `${sec.id} selected · ${info.straightKm.toFixed(1)} km ${info.bearing.dir} (~${info.roadKm.toFixed(0)} km drive from ${origin.shortLabel})`;
 
     maybeScrollToFieldGuide(addToHistory ? 220 : 80);
   }
@@ -1731,7 +1745,7 @@
     el.mapToast.textContent = "Reset complete · Click any sector or roll Letter → Number";
   }
 
-  // ==================== Field Guide Rendering ====================
+  // Field Guide Rendering
   const EXTRA_NEIGHBORS = {
     "B-17": ["C-16", "D-17"],
     "C-16": ["B-17"],
@@ -1784,7 +1798,7 @@
         <div class="guide-hero">
           <div>
             <div class="sector-code-pill">${origin.shortLabel} <span class="home-tag">HOME BASE</span></div>
-            <h3 class="guide-title">Ready to Roll &amp; Explore Islamabad</h3>
+            <h3 class="guide-title">Islamabad Sector Explorer</h3>
             <div class="badge-row">
               <span class="meta-badge status-active">${exploredCount} / ${DATA.SECTORS.length} Explored (${pct}%)</span>
               <span class="meta-badge">${origin.label}</span>
@@ -1798,18 +1812,18 @@
         </div>
         <div class="telemetry-card">
           <div class="route-brief">
-            <strong>Starting Point:</strong> ${origin.note}.<br />
-            Roll <strong>Letter (B–I)</strong> first to light up an entire Islamabad corridor across the map, then roll <strong>Number</strong> to lock onto a sector, calculate its real distance from <strong>${origin.shortLabel}</strong>, and pull up your local guide! Use the top <strong>Home: Sector › Spot</strong> menus, <strong>GPS</strong>, or <strong>Set as Home</strong> on any sector anytime.
+            <strong>Origin:</strong> ${origin.note}.<br />
+            Roll <strong>Letter (B–I)</strong> first to highlight an east–west corridor across the grid, then roll <strong>Number</strong> to lock a sector, measure routes from <strong>${origin.shortLabel}</strong>, and open its local notes. Change your origin anytime via <strong>Home</strong>, <strong>GPS</strong>, or <strong>Set as Home</strong>.
           </div>
         </div>
         <div class="guide-section">
-          <h3>Quick Grid Cheat-Sheet</h3>
+          <h3>Grid Summary</h3>
           <ul class="guide-list">
-            <li><strong>B &amp; C &amp; D:</strong> Scenic Margalla foothills, D-12 / Shah Allah Ditta &amp; far-west B-17</li>
-            <li><strong>E &amp; F:</strong> Trailheads, Faisal Mosque, Saidpur, Kohsar, Jinnah Super, Centaurus &amp; F-9 Park</li>
-            <li><strong>G:</strong> Red Zone (G-5), historic Aabpara/Melody (G-6), PIMS (G-8), Karachi Co (G-9) &amp; G-11 cafes</li>
+            <li><strong>B, C &amp; D:</strong> Margalla foothills, D-12 / Shah Allah Ditta, and western B-17</li>
+            <li><strong>E &amp; F:</strong> Trailheads, Faisal Mosque, Saidpur, Kohsar, Jinnah Super, Centaurus, and F-9 Park</li>
+            <li><strong>G:</strong> Red Zone (G-5), Aabpara/Melody (G-6), PIMS (G-8), Karachi Co (G-9), and G-11</li>
             <li><strong>H:</strong> University belt — AIOU, NUML &amp; Itwar Bazaar (H-9), IIUI (H-10), FAST &amp; Police Lines (H-11), NUST (H-12)</li>
-            <li><strong>I:</strong> I-8 Markaz desserts/cafes, I-9 industrial dhabas, I-10 auto hub &amp; I-11 Sabzi Mandi</li>
+            <li><strong>I:</strong> I-8 Markaz, I-9 industrial estate, I-10 auto market, and I-11 Sabzi Mandi</li>
           </ul>
         </div>
       `;
@@ -1846,12 +1860,12 @@
           </div>
         </div>
         <div class="guide-top-actions">
-          <button id="scroll-to-map-btn" class="back-to-map-btn" type="button">↑ View Map</button>
+          <button id="scroll-to-map-btn" class="back-to-map-btn" type="button">${iconSvg("arrow-up")}<span>View Map</span></button>
           <button id="set-home-btn" class="set-home-btn ${isThisHome ? "is-home" : ""}" type="button" ${isThisHome ? "disabled" : ""}>
-            ${isThisHome ? "⌂ Home Base ✓" : "⌂ Set as Home"}
+            ${isThisHome ? `${iconSvg("home")}<span>Home Base</span>` : `${iconSvg("home")}<span>Set as Home</span>`}
           </button>
           <button id="toggle-explored-btn" class="explored-btn ${isExplored ? "checked" : ""}" type="button">
-            ${isExplored ? "✓ Explored" : "○ Mark Explored"}
+            ${isExplored ? `${iconSvg("check")}<span>Explored</span>` : `${iconSvg("circle")}<span>Mark Explored</span>`}
           </button>
         </div>
       </div>
@@ -1877,26 +1891,26 @@
       </div>
 
       <div class="guide-section">
-        <h3>What to Expect (The Vibe)</h3>
+        <h3>Overview</h3>
         <p>${sec.vibe}</p>
       </div>
 
       <div class="guide-section">
-        <h3>Nice Things to Look Out For</h3>
+        <h3>Landmarks &amp; Points of Interest</h3>
         <ul class="guide-list">
           ${sec.highlights.map((item) => `<li>${item}</li>`).join("")}
         </ul>
       </div>
 
       <div class="guide-section">
-        <h3>Food, Chai &amp; Hangout Spots</h3>
+        <h3>Food &amp; Hangouts</h3>
         <ul class="guide-list">
           ${sec.food.map((item) => `<li>${item}</li>`).join("")}
         </ul>
       </div>
 
       <div class="tips-callout">
-        <strong>Local Heads-Up:</strong> ${sec.tips}
+        <strong>Notes:</strong> ${sec.tips}
       </div>
 
       <div class="guide-footer-links">
@@ -1914,9 +1928,9 @@
           }
         </div>
         <div class="external-links">
-          <button id="copy-trip-link-btn" class="ext-link copy-link-btn" type="button" title="Copy shareable route link for WhatsApp or Discord">Copy Trip Link</button>
-          <a class="ext-link" href="${gmapsUrl}" target="_blank" rel="noopener">Map ↗</a>
-          <a class="ext-link" href="${gdirUrl}" target="_blank" rel="noopener">Directions ↗</a>
+          <button id="copy-trip-link-btn" class="ext-link copy-link-btn" type="button" title="Copy shareable route link">${iconSvg("link")}<span>Copy Trip Link</span></button>
+          <a class="ext-link" href="${gmapsUrl}" target="_blank" rel="noopener"><span>Map</span>${iconSvg("external-link")}</a>
+          <a class="ext-link" href="${gdirUrl}" target="_blank" rel="noopener"><span>Directions</span>${iconSvg("external-link")}</a>
         </div>
       </div>
     `;
@@ -1954,16 +1968,16 @@
 
         if (copyResetTimer) clearTimeout(copyResetTimer);
         if (copied) {
-          copyBtn.textContent = "✓ Copied Link!";
+          copyBtn.innerHTML = `${iconSvg("check")}<span>Copied Link</span>`;
           copyBtn.classList.add("copied");
           el.mapToast.textContent = `Copied trip link: ${origin.shortLabel} → ${sec.id}`;
           playTick(660, 0.06, 0.06);
         } else {
-          copyBtn.textContent = "Hash Ready in URL";
+          copyBtn.innerHTML = `${iconSvg("link")}<span>URL Ready</span>`;
           el.mapToast.textContent = `Share URL: ${buildUrlHash(sec.id, origin)}`;
         }
         copyResetTimer = setTimeout(() => {
-          copyBtn.textContent = "Copy Trip Link";
+          copyBtn.innerHTML = `${iconSvg("link")}<span>Copy Trip Link</span>`;
           copyBtn.classList.remove("copied");
         }, 2200);
       });
@@ -1995,7 +2009,7 @@
     });
   }
 
-  // ==================== Search & Atlas Modal ====================
+  // Search & Atlas Modal
   function setupSearch() {
     function updateSearch() {
       const q = el.sectorSearch.value.trim().toLowerCase();
@@ -2082,7 +2096,7 @@
         (s) => `
       <button type="button" class="atlas-card" data-atlas-id="${s.id}">
         <div class="atlas-card-top">
-          <span class="atlas-code">${s.id} ${state.explored.has(s.id) ? "✓" : ""}</span>
+          <span class="atlas-code">${s.id}${state.explored.has(s.id) ? `<span class="atlas-visited-icon" aria-label="Visited">${iconSvg("check")}</span>` : ""}</span>
           <span class="atlas-dist">${s.isHome ? "HOME" : `${s.distKm.toFixed(1)} km`}</span>
         </div>
         <div class="atlas-name">${s.title}</div>
@@ -2122,7 +2136,7 @@
     lastFocusedBeforeAtlas = null;
   }
 
-  // ==================== Home Base Management ====================
+  // Home Base Management
   const SERIES_LABELS = {
     B: "B-Series (Zone II)",
     C: "C-Series",
@@ -2464,7 +2478,7 @@
     window.addEventListener("blur", () => resetGestures(true));
   }
 
-  // ==================== Event Bindings & Init ====================
+  // Event Bindings & Init
   function init() {
     initMap();
     populateHomeSectorSelect();
@@ -2528,7 +2542,6 @@
         const isOpen = el.mapLegend.classList.toggle("mobile-open");
         el.toggleLegendBtn.classList.toggle("active", isOpen);
         el.toggleLegendBtn.setAttribute("aria-expanded", String(isOpen));
-        el.toggleLegendBtn.textContent = isOpen ? "Legend ▴" : "Legend ▾";
       });
     }
 

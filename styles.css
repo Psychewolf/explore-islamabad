@@ -25,8 +25,8 @@
   --violet: #a78bfa;
   --rose: #fb7185;
 
-  --font-sans: "Inter", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -59,6 +59,35 @@ select {
   -webkit-tap-highlight-color: transparent;
 }
 
+.ui-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.metric-val,
+.atlas-dist,
+.atlas-code,
+.map-status-toast,
+.tt-dist,
+.tt-code,
+.meta-badge,
+.die-value,
+.pool-chip,
+.neighbor-btn,
+.history-chip {
+  font-variant-numeric: tabular-nums;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
@@ -75,7 +104,7 @@ select {
   background: rgba(148, 176, 194, 0.38);
 }
 
-/* ==================== App Shell ==================== */
+/* App Shell */
 .app-shell {
   display: flex;
   flex-direction: column;
@@ -189,8 +218,9 @@ select {
 }
 
 .origin-sep {
+  display: inline-flex;
+  align-items: center;
   color: rgba(110, 231, 183, 0.55);
-  font-weight: 700;
   flex-shrink: 0;
 }
 
@@ -285,7 +315,7 @@ select {
   border-color: rgba(16, 185, 129, 0.45);
 }
 
-/* ==================== Main Split Stage ==================== */
+/* Main Split Stage */
 .main-stage {
   flex: 1;
   min-height: 0;
@@ -293,7 +323,7 @@ select {
   grid-template-columns: minmax(0, 1.48fr) minmax(380px, 1fr);
 }
 
-/* ==================== Map Viewport (Left) ==================== */
+/* Map Viewport (Left) */
 .map-stage {
   position: relative;
   background:
@@ -575,6 +605,14 @@ select {
   background: rgba(12, 22, 33, 0.96);
 }
 
+.legend-toggle-btn .legend-chevron {
+  transition: transform 0.16s ease;
+}
+
+.legend-toggle-btn.active .legend-chevron {
+  transform: rotate(180deg);
+}
+
 .map-status-toast {
   pointer-events: auto;
   padding: 8px 12px;
@@ -769,7 +807,7 @@ select {
   color: var(--text-muted);
 }
 
-/* ==================== Right Studio Panel ==================== */
+/* Right Studio Panel */
 .studio-panel {
   background: var(--bg-panel);
   overflow-y: auto;
@@ -1129,7 +1167,7 @@ select {
   background: rgba(245, 158, 11, 0.22);
 }
 
-/* ==================== Sector Field Guide Card ==================== */
+/* Sector Field Guide Card */
 .field-guide {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
@@ -1219,6 +1257,9 @@ select {
 .explored-btn,
 .set-home-btn,
 .back-to-map-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 5px 10px;
   border-radius: 8px;
   border: 1px solid var(--border-subtle);
@@ -1397,6 +1438,9 @@ select {
 }
 
 .ext-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   text-decoration: none;
   font-family: inherit;
   font-size: 0.75rem;
@@ -1432,7 +1476,7 @@ select {
   color: #fde68a;
 }
 
-/* ==================== Atlas Modal (All 71 Sectors) ==================== */
+/* Atlas Modal (All 71 Sectors) */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1536,10 +1580,19 @@ select {
 }
 
 .atlas-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-family: var(--font-mono);
   font-weight: 800;
   color: var(--amber-bright);
   font-size: 0.94rem;
+}
+
+.atlas-visited-icon {
+  color: var(--emerald-bright);
+  display: inline-flex;
+  align-items: center;
 }
 
 .atlas-dist {
@@ -1562,7 +1615,7 @@ select {
   overflow: hidden;
 }
 
-/* ==================== Animations ==================== */
+/* Animations */
 @keyframes diceTumble {
   0% { transform: rotateX(0deg) rotateY(0deg) scale(1); }
   25% { transform: rotateX(115deg) rotateY(70deg) scale(1.07); }
@@ -1599,7 +1652,7 @@ select {
   }
 }
 
-/* ==================== Responsive Breakpoints ==================== */
+/* Responsive Breakpoints */
 @media (max-width: 1020px) {
   html,
   body {
