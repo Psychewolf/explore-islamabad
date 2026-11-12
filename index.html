@@ -15,13 +15,12 @@
     <header class="topbar">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="4"></rect>
-            <circle cx="8.5" cy="8.5" r="1.3" fill="currentColor"></circle>
-            <circle cx="15.5" cy="8.5" r="1.3" fill="currentColor"></circle>
-            <circle cx="12" cy="12" r="1.3" fill="currentColor"></circle>
-            <circle cx="8.5" cy="15.5" r="1.3" fill="currentColor"></circle>
-            <circle cx="15.5" cy="15.5" r="1.3" fill="currentColor"></circle>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square">
+            <rect x="3" y="3" width="18" height="18"></rect>
+            <line x1="9" y1="3" x2="9" y2="21"></line>
+            <line x1="15" y1="3" x2="15" y2="21"></line>
+            <line x1="3" y1="9" x2="21" y2="9"></line>
+            <line x1="3" y1="15" x2="21" y2="15"></line>
           </svg>
         </div>
         <div class="brand-text">
@@ -105,23 +104,17 @@
 
         <svg id="islamabad-map" viewBox="0 0 1320 880" preserveAspectRatio="xMidYMid meet">
           <defs>
-            <filter id="glow-amber" x="-30%" y="-30%" width="160%" height="160%">
-              <feGaussianBlur stdDeviation="5" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
-            <filter id="glow-cyan" x="-25%" y="-25%" width="150%" height="150%">
-              <feGaussianBlur stdDeviation="3.5" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
+            <pattern id="raw-hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <rect width="7" height="7" fill="#111114" />
+              <line x1="0" y1="0" x2="0" y2="7" stroke="#2C2C32" stroke-width="1.3" />
+            </pattern>
+            <pattern id="dev-hatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+              <rect width="9" height="9" fill="#141418" />
+              <line x1="0" y1="0" x2="0" y2="9" stroke="#24242A" stroke-width="1.1" />
+            </pattern>
             <linearGradient id="margalla-grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#0e3a2d" stop-opacity="0.72" />
-              <stop offset="100%" stop-color="#09251d" stop-opacity="0.16" />
+              <stop offset="0%" stop-color="#4D5E44" stop-opacity="0.38" />
+              <stop offset="100%" stop-color="#4D5E44" stop-opacity="0.08" />
             </linearGradient>
           </defs>
           <g id="map-viewport"></g>
@@ -131,12 +124,12 @@
 
         <div class="map-overlay-bottom">
           <div id="map-legend" class="map-legend">
-            <span class="legend-item"><span class="legend-swatch" style="background:#34d399;"></span><span id="legend-home-label">Home (H-11/4)</span></span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#2dd4bf;"></span>Rolled Letter Row</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#fbbf24;"></span>Selected Sector</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#a78bfa;"></span>Campus / Inst.</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#22c55e;"></span>Parks / Hills</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#475569;"></span>Raw / Developing</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#EAB308;"></span><span id="legend-home-label">Home (H-11/4)</span></span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#D4D4D8;"></span>Rolled Letter Row</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#FF4F00;"></span>Selected Sector</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#1A1A1E;border:1px solid #4A4A52;"></span>Built Sector</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#4D5E44;"></span>Parks / Foothills</span>
+            <span class="legend-item"><span class="legend-swatch legend-hatch"></span>Raw / Unbuilt</span>
           </div>
           <div class="map-bottom-bar">
             <button id="toggle-legend-btn" class="legend-toggle-btn" type="button" aria-expanded="false" aria-controls="map-legend">
@@ -150,52 +143,49 @@
 
       <!-- Right: Dice Roller Studio + Sector Field Guide -->
       <aside class="studio-panel">
-        <!-- Dice Roller Studio -->
-        <section class="dice-studio" aria-label="Two-Step Sector Dice Roller">
+        <!-- Split-Flap Departure Selector -->
+        <section class="dice-studio" aria-label="Split-Flap Sector Selector">
           <div class="studio-header">
             <h2 class="studio-title">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2.2">
-                <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"></polygon>
-                <line x1="12" y1="22" x2="12" y2="15.5"></line>
-                <polyline points="22 8.5 12 15.5 2 8.5"></polyline>
+              <svg class="ui-icon studio-board-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square">
+                <rect x="2" y="4" width="9" height="16"></rect>
+                <rect x="13" y="4" width="9" height="16"></rect>
+                <line x1="2" y1="12" x2="11" y2="12"></line>
+                <line x1="13" y1="12" x2="22" y2="12"></line>
               </svg>
-              Sector Dice Roller
+              Sector Dispatch
             </h2>
             <span id="step-pill" class="step-status-pill">Step 1: Roll Letter</span>
           </div>
 
           <div class="dice-grid">
-            <!-- Die 1: Letter -->
+            <!-- Flap 1: Letter -->
             <div id="letter-die-col" class="die-column active-step">
-              <span class="die-label">1 · Letter Die</span>
+              <span class="die-label">1 · Letter Flap</span>
               <div class="die-cube-stage">
-                <div id="letter-die" class="die-cube" role="button" tabindex="0" title="Click to roll Letter Die">
-                  <div class="die-pips">
-                    <span class="die-pip tl"></span><span class="die-pip tr"></span>
-                    <span class="die-pip bl"></span><span class="die-pip br"></span>
-                  </div>
+                <div id="letter-die" class="die-cube flap-unit" role="button" tabindex="0" title="Click to flip Letter">
+                  <span class="flap-hinge-line" aria-hidden="true"></span>
+                  <span class="flap-hinge-pins" aria-hidden="true"></span>
                   <span id="letter-die-val" class="die-value">?</span>
                 </div>
               </div>
-              <button id="roll-letter-btn" class="die-btn" type="button">Roll Letter</button>
+              <button id="roll-letter-btn" class="die-btn" type="button">Flip Letter</button>
               <div id="letter-pool-chips" class="die-pool-chips" aria-label="Available letters"></div>
             </div>
 
             <div class="die-hyphen" aria-hidden="true">-</div>
 
-            <!-- Die 2: Number -->
+            <!-- Flap 2: Number -->
             <div id="number-die-col" class="die-column">
-              <span class="die-label">2 · Number Die</span>
+              <span class="die-label">2 · Number Flap</span>
               <div class="die-cube-stage">
-                <div id="number-die" class="die-cube" role="button" tabindex="0" title="Roll Letter first, then click to roll Number">
-                  <div class="die-pips">
-                    <span class="die-pip tl"></span><span class="die-pip tr"></span>
-                    <span class="die-pip bl"></span><span class="die-pip br"></span>
-                  </div>
+                <div id="number-die" class="die-cube flap-unit" role="button" tabindex="0" title="Flip Letter first, then click to flip Number">
+                  <span class="flap-hinge-line" aria-hidden="true"></span>
+                  <span class="flap-hinge-pins" aria-hidden="true"></span>
                   <span id="number-die-val" class="die-value">?</span>
                 </div>
               </div>
-              <button id="roll-number-btn" class="die-btn amber" type="button" disabled>Roll Number</button>
+              <button id="roll-number-btn" class="die-btn amber" type="button" disabled>Flip Number</button>
               <div id="number-pool-chips" class="die-pool-chips" aria-label="Valid numbers for selected letter"></div>
             </div>
           </div>
