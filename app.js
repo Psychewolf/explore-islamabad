@@ -26,6 +26,16 @@
 
   const VALID_POOLS = new Set(["all", "active", "hangout", "unexplored"]);
   const VALID_SORTS = new Set(["distance", "grid", "hangout"]);
+  const VALID_THEMES = new Set(["dark", "light"]);
+
+  function detectDefaultTheme() {
+    const domTheme = document.documentElement.dataset.theme;
+    if (VALID_THEMES.has(domTheme)) return domTheme;
+    if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+      return "light";
+    }
+    return "dark";
+  }
 
   function loadJson(key, fallback) {
     try {
@@ -60,6 +70,7 @@
       rolledNumber: null,
       selectedSectorId: null,
       soundEnabled: true,
+      theme: detectDefaultTheme(),
       showLandmarks: true,
       focusRoute: false,
       explored: [],
@@ -154,6 +165,7 @@
       rolledNumber,
       selectedSectorId,
       soundEnabled: typeof saved.soundEnabled === "boolean" ? saved.soundEnabled : true,
+      theme: VALID_THEMES.has(saved.theme) ? saved.theme : detectDefaultTheme(),
       showLandmarks: typeof saved.showLandmarks === "boolean" ? saved.showLandmarks : true,
       focusRoute: Boolean(saved.focusRoute),
       explored: Array.isArray(saved.explored) ? saved.explored.filter((id) => Boolean(DATA.SECTOR_MAP[id])) : [],
@@ -356,6 +368,7 @@
     isRolling: false,
     showLandmarks: initial.showLandmarks,
     soundEnabled: initial.soundEnabled,
+    theme: initial.theme,
     focusRoute: initial.focusRoute,
     explored: new Set(initial.explored),
     history: initial.history,
@@ -386,6 +399,7 @@
       rolledNumber: state.rolledNumber,
       selectedSectorId: state.selectedSectorId,
       soundEnabled: state.soundEnabled,
+      theme: state.theme,
       showLandmarks: state.showLandmarks,
       focusRoute: state.focusRoute,
       explored: Array.from(state.explored),
@@ -405,6 +419,8 @@
     brandSubOrigin: document.getElementById("brand-sub-origin"),
     legendHomeLabel: document.getElementById("legend-home-label"),
     atlasSortDistanceOpt: document.getElementById("atlas-sort-distance-opt"),
+    themeToggleBtn: document.getElementById("theme-toggle-btn"),
+    themeLabel: document.getElementById("theme-label"),
     soundToggleBtn: document.getElementById("sound-toggle-btn"),
     soundLabel: document.getElementById("sound-label"),
     openAtlasBtn: document.getElementById("open-atlas-btn"),
@@ -742,75 +758,29 @@
       .join(" ");
   }
 
-  function sectorBaseFill(sec) {
-    switch (sec.category) {
-      case "park":
-        return "rgba(34, 197, 94, 0.2)";
-      case "commercial":
-        return "rgba(245, 158, 11, 0.14)";
-      case "upscale":
-        return "rgba(56, 189, 248, 0.14)";
-      case "institutional":
-        return "rgba(167, 139, 250, 0.15)";
-      case "administrative":
-        return "rgba(251, 113, 133, 0.15)";
-      case "industrial":
-        return "rgba(251, 146, 60, 0.14)";
-      case "developing":
-        return "rgba(45, 212, 191, 0.1)";
-      case "residential":
-        return "rgba(16, 185, 129, 0.12)";
-      default:
-        return "rgba(71, 85, 105, 0.14)";
-    }
-  }
-
-  function sectorBaseStroke(sec) {
-    switch (sec.category) {
-      case "park":
-        return "rgba(74, 222, 128, 0.45)";
-      case "commercial":
-        return "rgba(251, 191, 36, 0.42)";
-      case "upscale":
-        return "rgba(56, 189, 248, 0.42)";
-      case "institutional":
-        return "rgba(167, 139, 250, 0.42)";
-      case "administrative":
-        return "rgba(251, 113, 133, 0.42)";
-      case "industrial":
-        return "rgba(251, 146, 60, 0.42)";
-      case "developing":
-        return "rgba(45, 212, 191, 0.34)";
-      case "residential":
-        return "rgba(52, 211, 153, 0.38)";
-      default:
-        return "rgba(100, 116, 139, 0.35)";
-    }
-  }
-
   function initMap() {
     const vp = el.viewport;
     vp.innerHTML = "";
     sectorNodes.clear();
 
-    // 1. Subtle Cartographic Graticule (static)
-    const gridG = svgEl("g", { id: "grid-layer", opacity: "0.22", "pointer-events": "none" }, vp);
+    // 1. Cartographic Graticule (static)
+    const gridG = svgEl("g", { id: "grid-layer", "pointer-events": "none" }, vp);
     for (let x = 0; x <= 1320; x += 110) {
-      svgEl("line", { x1: x, y1: 0, x2: x, y2: 880, stroke: "#1e3a52", "stroke-width": 0.7, "stroke-dasharray": "3 6" }, gridG);
+      svgEl("line", { class: "graticule-line", x1: x, y1: 0, x2: x, y2: 880, "stroke-width": 0.7, "stroke-dasharray": "3 5" }, gridG);
     }
     for (let y = 0; y <= 880; y += 110) {
-      svgEl("line", { x1: 0, y1: y, x2: 1320, y2: y, stroke: "#1e3a52", "stroke-width": 0.7, "stroke-dasharray": "3 6" }, gridG);
+      svgEl("line", { class: "graticule-line", x1: 0, y1: y, x2: 1320, y2: y, "stroke-width": 0.7, "stroke-dasharray": "3 5" }, gridG);
     }
 
-    // 2. Natural Topography: Margalla Hills & Rawal Lake & Shakarparian (static)
+    // 2. Natural Topography: Margalla Hills, Rawal Lake, Shakarparian (static)
     const topoG = svgEl("g", { id: "topo-layer", "pointer-events": "none" }, vp);
     DATA.MARGALLA_RIDGES.forEach((ridge, idx) => {
       svgEl(
         "polygon",
         {
+          class: `topo-ridge${idx === 2 ? " topo-ridge-foothill" : ""}`,
           points: polyPointsStr(ridge),
           fill: "url(#margalla-grad)",
-          stroke: idx === 2 ? "rgba(52, 211, 153, 0.25)" : "rgba(52, 211, 153, 0.14)",
           "stroke-width": 1.1,
           "stroke-dasharray": idx === 2 ? "none" : "5 5",
         },
@@ -822,12 +792,12 @@
     const mTxt = svgEl(
       "text",
       {
+        class: "topo-margalla-label",
         x: margallaLabelPt.x,
         y: margallaLabelPt.y,
-        fill: "rgba(110, 231, 183, 0.52)",
-        "font-size": "13",
+        "font-size": "12.5",
         "font-weight": "700",
-        "letter-spacing": "7",
+        "letter-spacing": "6.5",
         "text-anchor": "middle",
         transform: `rotate(-25 ${margallaLabelPt.x} ${margallaLabelPt.y})`,
       },
@@ -839,17 +809,16 @@
     svgEl(
       "polygon",
       {
+        class: "topo-lake",
         points: polyPointsStr(DATA.RAWAL_LAKE),
-        fill: "rgba(14, 116, 144, 0.34)",
-        stroke: "rgba(56, 189, 248, 0.4)",
-        "stroke-width": 1.4,
+        "stroke-width": 1.3,
       },
       topoG
     );
     const rlPt = latLngToSvg(33.702, 73.133);
     const rlTxt = svgEl(
       "text",
-      { x: rlPt.x, y: rlPt.y, fill: "#7dd3fc", "font-size": "9.5", "font-weight": "600", "text-anchor": "middle", opacity: "0.75" },
+      { class: "topo-lake-label", x: rlPt.x, y: rlPt.y, "font-size": "9.5", "font-weight": "700", "text-anchor": "middle" },
       topoG
     );
     rlTxt.textContent = "Rawal Lake";
@@ -858,9 +827,8 @@
     svgEl(
       "polygon",
       {
+        class: "topo-park",
         points: polyPointsStr(DATA.SHAKARPARIAN),
-        fill: "rgba(34, 197, 94, 0.14)",
-        stroke: "rgba(74, 222, 128, 0.24)",
         "stroke-width": 1,
         "stroke-dasharray": "3 3",
       },
@@ -869,7 +837,7 @@
     const shakPt = latLngToSvg(33.686, 73.073);
     const sTxt = svgEl(
       "text",
-      { x: shakPt.x, y: shakPt.y, fill: "rgba(134, 239, 172, 0.58)", "font-size": "8", "font-weight": "600", "text-anchor": "middle" },
+      { class: "topo-park-label", x: shakPt.x, y: shakPt.y, "font-size": "8", "font-weight": "700", "text-anchor": "middle" },
       topoG
     );
     sTxt.textContent = "Shakarparian";
@@ -884,12 +852,12 @@
       svgEl(
         "polyline",
         {
+          class: road.kind === "highway" ? "road-highway" : "road-avenue",
           points: pts.join(" "),
           fill: "none",
-          stroke: road.kind === "highway" ? "rgba(251, 191, 36, 0.32)" : "rgba(148, 176, 194, 0.22)",
-          "stroke-width": road.kind === "highway" ? 2.6 : 1.3,
-          "stroke-linecap": "round",
-          "stroke-linejoin": "round",
+          "stroke-width": road.kind === "highway" ? 2.4 : 1.15,
+          "stroke-linecap": "square",
+          "stroke-linejoin": "miter",
         },
         roadsG
       );
@@ -900,9 +868,9 @@
     const srTxt = svgEl(
       "text",
       {
+        class: "road-label-highway",
         x: srinagarLbl.x,
         y: srinagarLbl.y - 5,
-        fill: "rgba(253, 224, 71, 0.62)",
         "font-size": "8",
         "font-weight": "700",
         "letter-spacing": "1.8",
@@ -917,11 +885,11 @@
     const jnTxt = svgEl(
       "text",
       {
+        class: "road-label-avenue",
         x: jinnahLbl.x,
         y: jinnahLbl.y - 4,
-        fill: "rgba(203, 213, 225, 0.45)",
         "font-size": "7",
-        "font-weight": "600",
+        "font-weight": "700",
         "letter-spacing": "1.5",
         "text-anchor": "middle",
         transform: `rotate(-28 ${jinnahLbl.x} ${jinnahLbl.y})`,
@@ -934,9 +902,9 @@
     const ijTxt = svgEl(
       "text",
       {
+        class: "road-label-highway",
         x: ijpLbl.x,
         y: ijpLbl.y + 11,
-        fill: "rgba(251, 146, 60, 0.48)",
         "font-size": "7.5",
         "font-weight": "700",
         "letter-spacing": "1.4",
@@ -947,29 +915,24 @@
     );
     ijTxt.textContent = "IJP ROAD · RAWALPINDI BORDER";
 
-    // 4. All 71 Sector Polygons (created once; state transitions toggle CSS classes)
+    // 4. All 71 Sector Polygons (created once; state & theme transitions driven by CSS)
     sectorsLayerEl = svgEl("g", { id: "sectors-layer" }, vp);
 
     DATA.SECTORS.forEach((sec) => {
       const centerSvg = latLngToSvg(sec.lat, sec.lng);
-      const g = svgEl("g", { class: "sector-group", "data-id": sec.id }, sectorsLayerEl);
+      const g = svgEl("g", { class: `sector-group tier-${sec.tier} cat-${sec.category}`, "data-id": sec.id }, sectorsLayerEl);
 
       const poly = svgEl(
         "polygon",
         {
           class: "sector-poly",
           points: polyPointsStr(sec.polygon),
-          fill: sectorBaseFill(sec),
-          stroke: sectorBaseStroke(sec),
-          "stroke-width": 1.15,
-          rx: 3,
         },
         g
       );
 
-      // Subtle inner Markaz crosshairs on developed/commercial sectors
       if (sec.tier === "active" && sec.category !== "park") {
-        svgEl("circle", { cx: centerSvg.x, cy: centerSvg.y + 8, r: 1.8, fill: "rgba(255,255,255,0.22)", "pointer-events": "none" }, g);
+        svgEl("circle", { class: "sector-markaz-dot", cx: centerSvg.x, cy: centerSvg.y + 8, r: 1.5, "pointer-events": "none" }, g);
       }
 
       const lbl = svgEl("text", { class: "sector-label", x: centerSvg.x, y: centerSvg.y - 2 }, g);
@@ -1018,21 +981,20 @@
     landmarksLayerEl = svgEl("g", { id: "landmarks-layer", "pointer-events": "none" }, vp);
     DATA.METRO_STOPS.forEach((stop) => {
       const p = latLngToSvg(stop.lat, stop.lng);
-      svgEl("circle", { cx: p.x, cy: p.y, r: 2.5, fill: "#fb923c", stroke: "#070e15", "stroke-width": 0.9 }, landmarksLayerEl);
+      svgEl("circle", { class: "lm-metro-dot", cx: p.x, cy: p.y, r: 2.3, "stroke-width": 0.9 }, landmarksLayerEl);
     });
     DATA.LANDMARKS.forEach((lm) => {
       const p = latLngToSvg(lm.lat, lm.lng);
-      svgEl("circle", { cx: p.x, cy: p.y, r: 3.1, fill: "#38bdf8", stroke: "#070e15", "stroke-width": 1.1 }, landmarksLayerEl);
+      svgEl("circle", { class: "lm-dot", cx: p.x, cy: p.y, r: 2.8, "stroke-width": 1.1 }, landmarksLayerEl);
       const t = svgEl(
         "text",
         {
+          class: "lm-label",
           x: p.x + (lm.dx ?? 5),
           y: p.y + (lm.dy ?? 3),
-          fill: "rgba(186, 230, 253, 0.88)",
           "font-size": "7.2",
-          "font-weight": "600",
+          "font-weight": "700",
           "text-anchor": lm.anchor || "start",
-          style: "text-shadow: 0 1px 3px #000;",
         },
         landmarksLayerEl
       );
@@ -1210,19 +1172,18 @@
 
     const originPt = latLngToSvg(origin.lat, origin.lng);
     svgEl("circle", { class: "home-ring", cx: originPt.x, cy: originPt.y, r: 10 }, fxLayerEl);
-    svgEl("circle", { cx: originPt.x, cy: originPt.y, r: 4.5, fill: "#34d399", stroke: "#042f2e", "stroke-width": 1.6 }, fxLayerEl);
+    svgEl("circle", { class: "fx-home-dot", cx: originPt.x, cy: originPt.y, r: 4.5, "stroke-width": 1.6 }, fxLayerEl);
 
     if (origin.isGps && originPt.x >= -20 && originPt.x <= 1340 && originPt.y >= -20 && originPt.y <= 900) {
       const gpsTxt = svgEl(
         "text",
         {
+          class: "fx-gps-label",
           x: originPt.x + 8,
           y: originPt.y - 6,
-          fill: "#6ee7b7",
           "font-family": "var(--font-mono)",
           "font-size": "9",
           "font-weight": "700",
-          style: "text-shadow: 0 1px 4px #000;",
         },
         fxLayerEl
       );
@@ -1281,25 +1242,24 @@
       svgEl(
         "rect",
         {
+          class: "fx-badge-rect",
           x: badgePos.x - pillW / 2,
-          y: badgePos.y - 11,
+          y: badgePos.y - 10,
           width: pillW,
-          height: 21,
-          rx: 10.5,
-          fill: "rgba(9, 17, 26, 0.94)",
-          stroke: "#fbbf24",
-          "stroke-width": 1.3,
+          height: 20,
+          rx: 2,
+          "stroke-width": 1.2,
         },
         fxLayerEl
       );
       const badgeTxt = svgEl(
         "text",
         {
+          class: "fx-badge-text",
           x: badgePos.x,
-          y: badgePos.y + 0.5,
-          fill: "#fde68a",
+          y: badgePos.y,
           "font-family": "var(--font-mono)",
-          "font-size": "9.5",
+          "font-size": "9.2",
           "font-weight": "700",
           "text-anchor": "middle",
           "dominant-baseline": "central",
@@ -1310,7 +1270,7 @@
     }
 
     // Target pin dot
-    svgEl("circle", { cx: targetPt.x, cy: targetPt.y, r: 5.5, fill: "#fbbf24", stroke: "#070e15", "stroke-width": 1.8, filter: "url(#glow-amber)" }, fxLayerEl);
+    svgEl("circle", { class: "fx-target-dot", cx: targetPt.x, cy: targetPt.y, r: 5, "stroke-width": 1.8 }, fxLayerEl);
   }
 
   function updateMapState() {
@@ -1331,13 +1291,12 @@
       group.classList.toggle("row-lit", isRowLit);
       group.classList.toggle("row-dimmed", isRowDimmed);
       group.classList.toggle("dimmed-pool", isDimPool);
+      group.classList.toggle("visited", isExplored);
 
       if (isHome) {
         sublabel.textContent = "HOME";
-        sublabel.style.fill = "#6ee7b7";
       } else if (isExplored) {
         sublabel.textContent = "VISITED";
-        sublabel.style.fill = "#34d399";
       } else if (sublabel.textContent) {
         sublabel.textContent = "";
       }
@@ -1855,7 +1814,7 @@
           <h3 class="guide-title">${sec.title}</h3>
           <div class="badge-row">
             <span class="meta-badge status-${statusTone}">${sec.status}</span>
-            <span class="meta-badge" style="border-color:${catMeta.color}55;color:${catMeta.color};">${catMeta.label}</span>
+            <span class="meta-badge">${catMeta.label}</span>
             <span class="meta-badge">${sec.lat.toFixed(4)}°N, ${sec.lng.toFixed(4)}°E</span>
           </div>
         </div>
@@ -2478,8 +2437,29 @@
     window.addEventListener("blur", () => resetGestures(true));
   }
 
+  function applyTheme(theme) {
+    const resolved = VALID_THEMES.has(theme) ? theme : "dark";
+    state.theme = resolved;
+    document.documentElement.dataset.theme = resolved;
+    if (el.themeToggleBtn) {
+      const nextThemeLabel = resolved === "dark" ? "Light" : "Dark";
+      el.themeToggleBtn.title =
+        resolved === "dark"
+          ? "Switch to Light Mode (Warm Paper & Ink)"
+          : "Switch to Dark Mode (Matte Topographic)";
+      el.themeToggleBtn.setAttribute(
+        "aria-label",
+        resolved === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"
+      );
+      if (el.themeLabel) {
+        el.themeLabel.textContent = nextThemeLabel;
+      }
+    }
+  }
+
   // Event Bindings & Init
   function init() {
+    applyTheme(state.theme);
     initMap();
     populateHomeSectorSelect();
     populateHomeSpotSelect();
@@ -2496,6 +2476,19 @@
     el.atlasSearch.value = state.atlasSearch;
     el.atlasLetterFilter.value = state.atlasLetterFilter;
     el.atlasSort.value = state.atlasSort;
+
+    if (el.themeToggleBtn) {
+      el.themeToggleBtn.addEventListener("click", () => {
+        const next = state.theme === "dark" ? "light" : "dark";
+        applyTheme(next);
+        persistState();
+        playTick(next === "light" ? 620 : 420, 0.05, 0.05);
+        el.mapToast.textContent =
+          next === "light"
+            ? "Light Mode · Warm Paper & Ink"
+            : "Dark Mode · Matte Topographic";
+      });
+    }
 
     el.homeSectorSelect.addEventListener("change", () => {
       const val = el.homeSectorSelect.value;
