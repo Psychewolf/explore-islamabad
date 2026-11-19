@@ -421,6 +421,8 @@
     atlasSortDistanceOpt: document.getElementById("atlas-sort-distance-opt"),
     themeToggleBtn: document.getElementById("theme-toggle-btn"),
     themeLabel: document.getElementById("theme-label"),
+    githubLink: document.getElementById("github-link"),
+    githubStarCount: document.getElementById("github-star-count"),
     soundToggleBtn: document.getElementById("sound-toggle-btn"),
     soundLabel: document.getElementById("sound-label"),
     openAtlasBtn: document.getElementById("open-atlas-btn"),
@@ -742,11 +744,14 @@
     "arrow-up": '<line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline>',
     "external-link": '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line>',
     link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>',
+    github: '<path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path>',
+    star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>',
   };
 
   function iconSvg(name) {
     const body = UI_ICONS[name] || "";
-    return `<svg class="ui-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+    const isFilled = name === "github" || name === "star";
+    return `<svg class="ui-icon ui-icon-${name}" width="14" height="14" viewBox="0 0 24 24" fill="${isFilled ? "currentColor" : "none"}" stroke="currentColor" stroke-width="${isFilled ? "1" : "2"}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
   }
 
   function polyPointsStr(latLngList) {
@@ -1785,6 +1790,20 @@
             <li><strong>I:</strong> I-8 Markaz, I-9 industrial estate, I-10 auto market, and I-11 Sabzi Mandi</li>
           </ul>
         </div>
+        <div class="guide-section">
+          <h3>Project &amp; Source</h3>
+          <p>
+            An open-source interactive cartography project for Islamabad's master-planned grid.
+          </p>
+          <div class="guide-ext-row">
+            <a class="ext-link" href="https://github.com/Psychewolf/explore-islamabad" target="_blank" rel="noopener noreferrer" title="View repository on GitHub">
+              ${iconSvg("github")}<span>Psychewolf/explore-islamabad</span>
+            </a>
+            <a class="ext-link" href="https://github.com/Psychewolf/explore-islamabad/stargazers" target="_blank" rel="noopener noreferrer" title="Star on GitHub">
+              ${iconSvg("star")}<span>Star on GitHub</span>
+            </a>
+          </div>
+        </div>
       `;
       const resetHomeBtn = document.getElementById("reset-home-default-btn");
       if (resetHomeBtn) {
@@ -1890,6 +1909,7 @@
           <button id="copy-trip-link-btn" class="ext-link copy-link-btn" type="button" title="Copy shareable route link">${iconSvg("link")}<span>Copy Trip Link</span></button>
           <a class="ext-link" href="${gmapsUrl}" target="_blank" rel="noopener"><span>Map</span>${iconSvg("external-link")}</a>
           <a class="ext-link" href="${gdirUrl}" target="_blank" rel="noopener"><span>Directions</span>${iconSvg("external-link")}</a>
+          <a class="ext-link" href="https://github.com/Psychewolf/explore-islamabad" target="_blank" rel="noopener noreferrer" title="Star on GitHub">${iconSvg("star")}<span>Star</span></a>
         </div>
       </div>
     `;
@@ -2694,6 +2714,38 @@
       el.mapToast.textContent = `Restored Row ${state.rolledLetter} · Roll Number to pick a sector`;
     }
     persistState();
+
+    function updateGitHubStarCount() {
+      if (!el.githubStarCount) return;
+      try {
+        const cached = localStorage.getItem("isb_github_stars");
+        if (cached !== null && cached !== "") {
+          el.githubStarCount.textContent = cached;
+        }
+      } catch (_) {}
+
+      if (typeof fetch === "function") {
+        fetch("https://api.github.com/repos/Psychewolf/explore-islamabad", {
+          headers: { Accept: "application/vnd.github.v3+json" },
+        })
+          .then((res) => {
+            if (!res.ok) throw new Error("Status " + res.status);
+            return res.json();
+          })
+          .then((data) => {
+            if (data && typeof data.stargazers_count === "number") {
+              const countStr = String(data.stargazers_count);
+              el.githubStarCount.textContent = countStr;
+              try {
+                localStorage.setItem("isb_github_stars", countStr);
+              } catch (_) {}
+            }
+          })
+          .catch(() => {});
+      }
+    }
+
+    updateGitHubStarCount();
   }
 
   init();

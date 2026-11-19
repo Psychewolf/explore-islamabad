@@ -233,6 +233,7 @@ html[data-theme="dark"] {
   --legend-hatch-border: #3B3B42;
   --legend-hatch-a: #111114;
   --legend-hatch-b: #2E2E35;
+  --star-color: #EAB308;
 
   --font-sans: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -476,6 +477,7 @@ html[data-theme="light"] {
   --legend-hatch-border: #9E9789;
   --legend-hatch-a: #E9E3D6;
   --legend-hatch-b: #A8A194;
+  --star-color: #C84B31;
 }
 
 *,
@@ -745,6 +747,7 @@ select {
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   white-space: nowrap;
+  text-decoration: none;
 }
 
 .top-btn:hover {
@@ -757,6 +760,47 @@ select {
   background: var(--top-btn-active-bg);
   color: var(--top-btn-active-fg);
   border-color: var(--top-btn-active-border);
+}
+
+.github-btn {
+  gap: 6px;
+}
+
+.github-star-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  color: var(--heading-ink);
+  line-height: 1.2;
+}
+
+.github-star-pill .star-icon {
+  color: var(--star-color);
+  flex-shrink: 0;
+}
+
+.top-btn:hover .github-star-pill {
+  border-color: var(--border-strong);
+}
+
+.guide-ext-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.atlas-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 html[data-theme="dark"] .theme-icon-sun,
@@ -2478,6 +2522,10 @@ html[data-theme="light"] .theme-icon-moon {
 }
 
 @media (max-width: 640px) {
+  .github-label {
+    display: none;
+  }
+
   .map-overlay-top {
     top: 10px;
     left: 10px;
@@ -2731,10 +2779,11 @@ html[data-theme="light"] .theme-icon-moon {
   }
 
   #theme-toggle-btn,
-  #sound-toggle-btn {
+  #sound-toggle-btn,
+  #github-link {
     min-width: 36px;
     min-height: 36px;
-    padding: 6px 9px;
+    padding: 6px 8px;
     justify-content: center;
   }
 
